@@ -393,3 +393,411 @@ func UnmarshalResponse(r *Reader, apiKey, apiVersion int16) (Message, error) {
 	}
 	return m, nil
 }
+
+// ReadHeader decodes a Kafka request header. For flexible (apiKey, apiVersion)
+// combinations it also consumes the trailing tagged-fields count, leaving r
+// positioned at the start of the request body.
+func ReadHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32, clientID *string, err error) {
+	apiKey, err = r.ReadInt16()
+	if err != nil {
+		return
+	}
+	apiVersion, err = r.ReadInt16()
+	if err != nil {
+		return
+	}
+	corrID, err = r.ReadInt32()
+	if err != nil {
+		return
+	}
+	clientID, err = r.ReadNullableString()
+	if err != nil {
+		return
+	}
+	if requestHeaderFlexible(apiKey, apiVersion) {
+		if _, err = r.ReadUvarint(); err != nil {
+			return
+		}
+	}
+	return
+}
+
+func requestHeaderFlexible(apiKey, apiVersion int16) bool {
+	_ = apiVersion
+	switch apiKey {
+	case 0: // ProduceRequest
+		return apiVersion >= 9
+	case 1: // FetchRequest
+		return apiVersion >= 12
+	case 2: // ListOffsetsRequest
+		return apiVersion >= 6
+	case 3: // MetadataRequest
+		return apiVersion >= 9
+	case 8: // OffsetCommitRequest
+		return apiVersion >= 8
+	case 9: // OffsetFetchRequest
+		return apiVersion >= 6
+	case 10: // FindCoordinatorRequest
+		return apiVersion >= 3
+	case 11: // JoinGroupRequest
+		return apiVersion >= 6
+	case 12: // HeartbeatRequest
+		return apiVersion >= 4
+	case 13: // LeaveGroupRequest
+		return apiVersion >= 4
+	case 14: // SyncGroupRequest
+		return apiVersion >= 4
+	case 15: // DescribeGroupsRequest
+		return apiVersion >= 5
+	case 16: // ListGroupsRequest
+		return apiVersion >= 3
+	case 17: // SaslHandshakeRequest
+		return false
+	case 18: // ApiVersionsRequest
+		return apiVersion >= 3
+	case 19: // CreateTopicsRequest
+		return apiVersion >= 5
+	case 20: // DeleteTopicsRequest
+		return apiVersion >= 4
+	case 21: // DeleteRecordsRequest
+		return apiVersion >= 2
+	case 22: // InitProducerIdRequest
+		return apiVersion >= 2
+	case 23: // OffsetForLeaderEpochRequest
+		return apiVersion >= 4
+	case 24: // AddPartitionsToTxnRequest
+		return apiVersion >= 3
+	case 25: // AddOffsetsToTxnRequest
+		return apiVersion >= 3
+	case 26: // EndTxnRequest
+		return apiVersion >= 3
+	case 27: // WriteTxnMarkersRequest
+		return apiVersion >= 1
+	case 28: // TxnOffsetCommitRequest
+		return apiVersion >= 3
+	case 29: // DescribeAclsRequest
+		return apiVersion >= 2
+	case 30: // CreateAclsRequest
+		return apiVersion >= 2
+	case 31: // DeleteAclsRequest
+		return apiVersion >= 2
+	case 32: // DescribeConfigsRequest
+		return apiVersion >= 4
+	case 33: // AlterConfigsRequest
+		return apiVersion >= 2
+	case 34: // AlterReplicaLogDirsRequest
+		return apiVersion >= 2
+	case 35: // DescribeLogDirsRequest
+		return apiVersion >= 2
+	case 36: // SaslAuthenticateRequest
+		return apiVersion >= 2
+	case 37: // CreatePartitionsRequest
+		return apiVersion >= 2
+	case 38: // CreateDelegationTokenRequest
+		return apiVersion >= 2
+	case 39: // RenewDelegationTokenRequest
+		return apiVersion >= 2
+	case 40: // ExpireDelegationTokenRequest
+		return apiVersion >= 2
+	case 41: // DescribeDelegationTokenRequest
+		return apiVersion >= 2
+	case 42: // DeleteGroupsRequest
+		return apiVersion >= 2
+	case 43: // ElectLeadersRequest
+		return apiVersion >= 2
+	case 44: // IncrementalAlterConfigsRequest
+		return apiVersion >= 1
+	case 45: // AlterPartitionReassignmentsRequest
+		return true
+	case 46: // ListPartitionReassignmentsRequest
+		return true
+	case 47: // OffsetDeleteRequest
+		return false
+	case 48: // DescribeClientQuotasRequest
+		return apiVersion >= 1
+	case 49: // AlterClientQuotasRequest
+		return apiVersion >= 1
+	case 50: // DescribeUserScramCredentialsRequest
+		return true
+	case 51: // AlterUserScramCredentialsRequest
+		return true
+	case 52: // VoteRequest
+		return true
+	case 53: // BeginQuorumEpochRequest
+		return apiVersion >= 1
+	case 54: // EndQuorumEpochRequest
+		return apiVersion >= 1
+	case 55: // DescribeQuorumRequest
+		return true
+	case 56: // AlterPartitionRequest
+		return true
+	case 57: // UpdateFeaturesRequest
+		return true
+	case 58: // EnvelopeRequest
+		return true
+	case 59: // FetchSnapshotRequest
+		return true
+	case 60: // DescribeClusterRequest
+		return true
+	case 61: // DescribeProducersRequest
+		return true
+	case 62: // BrokerRegistrationRequest
+		return true
+	case 63: // BrokerHeartbeatRequest
+		return true
+	case 64: // UnregisterBrokerRequest
+		return true
+	case 65: // DescribeTransactionsRequest
+		return true
+	case 66: // ListTransactionsRequest
+		return true
+	case 67: // AllocateProducerIdsRequest
+		return true
+	case 68: // ConsumerGroupHeartbeatRequest
+		return true
+	case 69: // ConsumerGroupDescribeRequest
+		return true
+	case 70: // ControllerRegistrationRequest
+		return true
+	case 71: // GetTelemetrySubscriptionsRequest
+		return true
+	case 72: // PushTelemetryRequest
+		return true
+	case 73: // AssignReplicasToDirsRequest
+		return true
+	case 74: // ListConfigResourcesRequest
+		return true
+	case 75: // DescribeTopicPartitionsRequest
+		return true
+	case 76: // ShareGroupHeartbeatRequest
+		return true
+	case 77: // ShareGroupDescribeRequest
+		return true
+	case 78: // ShareFetchRequest
+		return true
+	case 79: // ShareAcknowledgeRequest
+		return true
+	case 80: // AddRaftVoterRequest
+		return true
+	case 81: // RemoveRaftVoterRequest
+		return true
+	case 82: // UpdateRaftVoterRequest
+		return true
+	case 83: // InitializeShareGroupStateRequest
+		return true
+	case 84: // ReadShareGroupStateRequest
+		return true
+	case 85: // WriteShareGroupStateRequest
+		return true
+	case 86: // DeleteShareGroupStateRequest
+		return true
+	case 87: // ReadShareGroupStateSummaryRequest
+		return true
+	case 88: // StreamsGroupHeartbeatRequest
+		return true
+	case 89: // StreamsGroupDescribeRequest
+		return true
+	case 90: // DescribeShareGroupOffsetsRequest
+		return true
+	case 91: // AlterShareGroupOffsetsRequest
+		return true
+	case 92: // DeleteShareGroupOffsetsRequest
+		return true
+	}
+	return false
+}
+
+// WriteHeader encodes a Kafka response header (correlation id, plus an empty
+// tagged-fields block for flexible apiVersions). apiKey and apiVersion are
+// only used to decide whether the header is flexible.
+func WriteHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32) {
+	w.WriteInt32(corrID)
+	if responseHeaderFlexible(apiKey, apiVersion) {
+		w.WriteUvarint(0)
+	}
+}
+
+func responseHeaderFlexible(apiKey, apiVersion int16) bool {
+	_ = apiVersion
+	switch apiKey {
+	case 0: // ProduceResponse
+		return apiVersion >= 9
+	case 1: // FetchResponse
+		return apiVersion >= 12
+	case 2: // ListOffsetsResponse
+		return apiVersion >= 6
+	case 3: // MetadataResponse
+		return apiVersion >= 9
+	case 8: // OffsetCommitResponse
+		return apiVersion >= 8
+	case 9: // OffsetFetchResponse
+		return apiVersion >= 6
+	case 10: // FindCoordinatorResponse
+		return apiVersion >= 3
+	case 11: // JoinGroupResponse
+		return apiVersion >= 6
+	case 12: // HeartbeatResponse
+		return apiVersion >= 4
+	case 13: // LeaveGroupResponse
+		return apiVersion >= 4
+	case 14: // SyncGroupResponse
+		return apiVersion >= 4
+	case 15: // DescribeGroupsResponse
+		return apiVersion >= 5
+	case 16: // ListGroupsResponse
+		return apiVersion >= 3
+	case 17: // SaslHandshakeResponse
+		return false
+	case 18: // ApiVersionsResponse
+		return apiVersion >= 3
+	case 19: // CreateTopicsResponse
+		return apiVersion >= 5
+	case 20: // DeleteTopicsResponse
+		return apiVersion >= 4
+	case 21: // DeleteRecordsResponse
+		return apiVersion >= 2
+	case 22: // InitProducerIdResponse
+		return apiVersion >= 2
+	case 23: // OffsetForLeaderEpochResponse
+		return apiVersion >= 4
+	case 24: // AddPartitionsToTxnResponse
+		return apiVersion >= 3
+	case 25: // AddOffsetsToTxnResponse
+		return apiVersion >= 3
+	case 26: // EndTxnResponse
+		return apiVersion >= 3
+	case 27: // WriteTxnMarkersResponse
+		return apiVersion >= 1
+	case 28: // TxnOffsetCommitResponse
+		return apiVersion >= 3
+	case 29: // DescribeAclsResponse
+		return apiVersion >= 2
+	case 30: // CreateAclsResponse
+		return apiVersion >= 2
+	case 31: // DeleteAclsResponse
+		return apiVersion >= 2
+	case 32: // DescribeConfigsResponse
+		return apiVersion >= 4
+	case 33: // AlterConfigsResponse
+		return apiVersion >= 2
+	case 34: // AlterReplicaLogDirsResponse
+		return apiVersion >= 2
+	case 35: // DescribeLogDirsResponse
+		return apiVersion >= 2
+	case 36: // SaslAuthenticateResponse
+		return apiVersion >= 2
+	case 37: // CreatePartitionsResponse
+		return apiVersion >= 2
+	case 38: // CreateDelegationTokenResponse
+		return apiVersion >= 2
+	case 39: // RenewDelegationTokenResponse
+		return apiVersion >= 2
+	case 40: // ExpireDelegationTokenResponse
+		return apiVersion >= 2
+	case 41: // DescribeDelegationTokenResponse
+		return apiVersion >= 2
+	case 42: // DeleteGroupsResponse
+		return apiVersion >= 2
+	case 43: // ElectLeadersResponse
+		return apiVersion >= 2
+	case 44: // IncrementalAlterConfigsResponse
+		return apiVersion >= 1
+	case 45: // AlterPartitionReassignmentsResponse
+		return true
+	case 46: // ListPartitionReassignmentsResponse
+		return true
+	case 47: // OffsetDeleteResponse
+		return false
+	case 48: // DescribeClientQuotasResponse
+		return apiVersion >= 1
+	case 49: // AlterClientQuotasResponse
+		return apiVersion >= 1
+	case 50: // DescribeUserScramCredentialsResponse
+		return true
+	case 51: // AlterUserScramCredentialsResponse
+		return true
+	case 52: // VoteResponse
+		return true
+	case 53: // BeginQuorumEpochResponse
+		return apiVersion >= 1
+	case 54: // EndQuorumEpochResponse
+		return apiVersion >= 1
+	case 55: // DescribeQuorumResponse
+		return true
+	case 56: // AlterPartitionResponse
+		return true
+	case 57: // UpdateFeaturesResponse
+		return true
+	case 58: // EnvelopeResponse
+		return true
+	case 59: // FetchSnapshotResponse
+		return true
+	case 60: // DescribeClusterResponse
+		return true
+	case 61: // DescribeProducersResponse
+		return true
+	case 62: // BrokerRegistrationResponse
+		return true
+	case 63: // BrokerHeartbeatResponse
+		return true
+	case 64: // UnregisterBrokerResponse
+		return true
+	case 65: // DescribeTransactionsResponse
+		return true
+	case 66: // ListTransactionsResponse
+		return true
+	case 67: // AllocateProducerIdsResponse
+		return true
+	case 68: // ConsumerGroupHeartbeatResponse
+		return true
+	case 69: // ConsumerGroupDescribeResponse
+		return true
+	case 70: // ControllerRegistrationResponse
+		return true
+	case 71: // GetTelemetrySubscriptionsResponse
+		return true
+	case 72: // PushTelemetryResponse
+		return true
+	case 73: // AssignReplicasToDirsResponse
+		return true
+	case 74: // ListConfigResourcesResponse
+		return true
+	case 75: // DescribeTopicPartitionsResponse
+		return true
+	case 76: // ShareGroupHeartbeatResponse
+		return true
+	case 77: // ShareGroupDescribeResponse
+		return true
+	case 78: // ShareFetchResponse
+		return true
+	case 79: // ShareAcknowledgeResponse
+		return true
+	case 80: // AddRaftVoterResponse
+		return true
+	case 81: // RemoveRaftVoterResponse
+		return true
+	case 82: // UpdateRaftVoterResponse
+		return true
+	case 83: // InitializeShareGroupStateResponse
+		return true
+	case 84: // ReadShareGroupStateResponse
+		return true
+	case 85: // WriteShareGroupStateResponse
+		return true
+	case 86: // DeleteShareGroupStateResponse
+		return true
+	case 87: // ReadShareGroupStateSummaryResponse
+		return true
+	case 88: // StreamsGroupHeartbeatResponse
+		return true
+	case 89: // StreamsGroupDescribeResponse
+		return true
+	case 90: // DescribeShareGroupOffsetsResponse
+		return true
+	case 91: // AlterShareGroupOffsetsResponse
+		return true
+	case 92: // DeleteShareGroupOffsetsResponse
+		return true
+	}
+	return false
+}

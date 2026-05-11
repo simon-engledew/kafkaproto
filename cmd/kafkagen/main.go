@@ -160,7 +160,84 @@ func EmitDispatch(specs []*Spec) ([]byte, error) {
 	emitDispatchFn(e, "UnmarshalRequest", "request", specs)
 	emitDispatchFn(e, "UnmarshalResponse", "response", specs)
 
+	emitReadHeader(e, specs)
+	emitWriteHeader(e, specs)
+
 	return gofmt(e.buf.Bytes())
+}
+
+// emitReadHeader writes a free-standing ReadHeader helper that decodes a Kafka
+// request header (apiKey, apiVersion, correlationId, clientId) and — for
+// flexible (apiKey, apiVersion) combinations — consumes the trailing empty
+// tagged-fields block. Flexibility is determined per apiKey from the request
+// spec's flexibleVersions.
+func emitReadHeader(e *emitter, specs []*Spec) {
+	e.line("// ReadHeader decodes a Kafka request header. For flexible (apiKey, apiVersion)")
+	e.line("// combinations it also consumes the trailing tagged-fields count, leaving r")
+	e.line("// positioned at the start of the request body.")
+	e.line("func ReadHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32, clientID *string, err error) {")
+	e.line("\tapiKey, err = r.ReadInt16()")
+	e.line("\tif err != nil { return }")
+	e.line("\tapiVersion, err = r.ReadInt16()")
+	e.line("\tif err != nil { return }")
+	e.line("\tcorrID, err = r.ReadInt32()")
+	e.line("\tif err != nil { return }")
+	e.line("\tclientID, err = r.ReadNullableString()")
+	e.line("\tif err != nil { return }")
+	e.line("\tif requestHeaderFlexible(apiKey, apiVersion) {")
+	e.line("\t\tif _, err = r.ReadUvarint(); err != nil { return }")
+	e.line("\t}")
+	e.line("\treturn")
+	e.line("}")
+	e.line("")
+	emitFlexibleSwitch(e, "requestHeaderFlexible", "request", specs)
+}
+
+// emitWriteHeader writes a free-standing WriteHeader helper that encodes a
+// Kafka response header (correlationId, plus an empty tagged-fields block for
+// flexible versions). Flexibility is determined per apiKey from the response
+// spec's flexibleVersions.
+func emitWriteHeader(e *emitter, specs []*Spec) {
+	e.line("// WriteHeader encodes a Kafka response header (correlation id, plus an empty")
+	e.line("// tagged-fields block for flexible apiVersions). apiKey and apiVersion are")
+	e.line("// only used to decide whether the header is flexible.")
+	e.line("func WriteHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32) {")
+	e.line("\tw.WriteInt32(corrID)")
+	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
+	e.line("\t\tw.WriteUvarint(0)")
+	e.line("\t}")
+	e.line("}")
+	e.line("")
+	emitFlexibleSwitch(e, "responseHeaderFlexible", "response", specs)
+}
+
+func emitFlexibleSwitch(e *emitter, fnName, kind string, specs []*Spec) {
+	byKey := map[int]*Spec{}
+	for _, s := range specs {
+		if s.Type != kind || !s.HasAPIKey {
+			continue
+		}
+		byKey[s.APIKey] = s
+	}
+	keys := make([]int, 0, len(byKey))
+	for k := range byKey {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	e.line("func %s(apiKey, apiVersion int16) bool {", fnName)
+	e.line("\t_ = apiVersion")
+	e.line("\tswitch apiKey {")
+	for _, k := range keys {
+		s := byKey[k]
+		cond := s.Flexible.Condition("apiVersion")
+		e.line("\tcase %d: // %s", k, s.Name)
+		e.line("\t\treturn %s", cond)
+	}
+	e.line("\t}")
+	e.line("\treturn false")
+	e.line("}")
+	e.line("")
 }
 
 func emitDispatchFn(e *emitter, fnName, kind string, specs []*Spec) {
