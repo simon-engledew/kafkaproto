@@ -620,11 +620,18 @@ func requestHeaderFlexible(apiKey, apiVersion int16) bool {
 	return false
 }
 
-// ReadResponseHeader decodes a Kafka response header (correlation id, plus
-// the tagged-fields count for flexible apiVersions). apiKey and apiVersion
-// are only used to decide whether the header is flexible.
-func ReadResponseHeader(r *Reader, apiKey int16, apiVersion int16) (corrID int32, err error) {
+// ReadResponseHeader decodes a Kafka response header. The wire form is just
+// the correlation id (plus a tagged-fields count for flexible apiVersions),
+// so the caller supplies a lookup that maps the just-read corrID back to the
+// (apiKey, apiVersion) of the original request — typically by consulting an
+// in-flight table — which is what we need to decide whether the header is
+// flexible. A non-nil error from lookup is returned as-is.
+func ReadResponseHeader(r *Reader, lookup func(corrID int32) (apiKey, apiVersion int16, err error)) (corrID int32, apiKey int16, apiVersion int16, err error) {
 	corrID, err = r.ReadInt32()
+	if err != nil {
+		return
+	}
+	apiKey, apiVersion, err = lookup(corrID)
 	if err != nil {
 		return
 	}
