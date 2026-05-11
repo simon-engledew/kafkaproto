@@ -232,7 +232,7 @@ func emitResponseHeaderCodec(e *emitter, specs []*Spec) {
 	e.line("// WriteResponseHeader encodes a Kafka response header (correlation id, plus")
 	e.line("// an empty tagged-fields block for flexible apiVersions). apiKey and")
 	e.line("// apiVersion are only used to decide whether the header is flexible.")
-	e.line("func WriteResponseHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32) {")
+	e.line("func WriteResponseHeader(w *Writer, corrID int32, apiKey int16, apiVersion int16) {")
 	e.line("\tw.WriteInt32(corrID)")
 	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
 	e.line("\t\tw.WriteUvarint(0)")

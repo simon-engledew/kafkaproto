@@ -646,7 +646,7 @@ func ReadResponseHeader(r *Reader, lookup func(corrID int32) (apiKey, apiVersion
 // WriteResponseHeader encodes a Kafka response header (correlation id, plus
 // an empty tagged-fields block for flexible apiVersions). apiKey and
 // apiVersion are only used to decide whether the header is flexible.
-func WriteResponseHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32) {
+func WriteResponseHeader(w *Writer, corrID int32, apiKey int16, apiVersion int16) {
 	w.WriteInt32(corrID)
 	if responseHeaderFlexible(apiKey, apiVersion) {
 		w.WriteUvarint(0)
