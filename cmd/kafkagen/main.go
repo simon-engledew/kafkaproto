@@ -160,22 +160,22 @@ func EmitDispatch(specs []*Spec) ([]byte, error) {
 	emitDispatchFn(e, "UnmarshalRequest", "request", specs)
 	emitDispatchFn(e, "UnmarshalResponse", "response", specs)
 
-	emitReadHeader(e, specs)
-	emitWriteHeader(e, specs)
+	emitRequestHeaderCodec(e, specs)
+	emitResponseHeaderCodec(e, specs)
 
 	return gofmt(e.buf.Bytes())
 }
 
-// emitReadHeader writes a free-standing ReadHeader helper that decodes a Kafka
-// request header (apiKey, apiVersion, correlationId, clientId) and — for
-// flexible (apiKey, apiVersion) combinations — consumes the trailing empty
-// tagged-fields block. Flexibility is determined per apiKey from the request
-// spec's flexibleVersions.
-func emitReadHeader(e *emitter, specs []*Spec) {
-	e.line("// ReadHeader decodes a Kafka request header. For flexible (apiKey, apiVersion)")
-	e.line("// combinations it also consumes the trailing tagged-fields count, leaving r")
-	e.line("// positioned at the start of the request body.")
-	e.line("func ReadHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32, clientID *string, err error) {")
+// emitRequestHeaderCodec writes free-standing ReadRequestHeader and
+// WriteRequestHeader helpers. For flexible (apiKey, apiVersion) combinations
+// the read path consumes the trailing tagged-fields count and the write path
+// emits an empty tagged-fields block. Flexibility is determined per apiKey
+// from the request spec's flexibleVersions.
+func emitRequestHeaderCodec(e *emitter, specs []*Spec) {
+	e.line("// ReadRequestHeader decodes a Kafka request header. For flexible (apiKey,")
+	e.line("// apiVersion) combinations it also consumes the trailing tagged-fields count,")
+	e.line("// leaving r positioned at the start of the request body.")
+	e.line("func ReadRequestHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32, clientID *string, err error) {")
 	e.line("\tapiKey, err = r.ReadInt16()")
 	e.line("\tif err != nil { return }")
 	e.line("\tapiVersion, err = r.ReadInt16()")
@@ -190,18 +190,44 @@ func emitReadHeader(e *emitter, specs []*Spec) {
 	e.line("\treturn")
 	e.line("}")
 	e.line("")
+	e.line("// WriteRequestHeader encodes a Kafka request header (apiKey, apiVersion,")
+	e.line("// correlation id, client id). For flexible (apiKey, apiVersion) combinations")
+	e.line("// it also writes an empty tagged-fields block.")
+	e.line("func WriteRequestHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32, clientID *string) {")
+	e.line("\tw.WriteInt16(apiKey)")
+	e.line("\tw.WriteInt16(apiVersion)")
+	e.line("\tw.WriteInt32(corrID)")
+	e.line("\tw.WriteNullableString(clientID)")
+	e.line("\tif requestHeaderFlexible(apiKey, apiVersion) {")
+	e.line("\t\tw.WriteUvarint(0)")
+	e.line("\t}")
+	e.line("}")
+	e.line("")
 	emitFlexibleSwitch(e, "requestHeaderFlexible", "request", specs)
 }
 
-// emitWriteHeader writes a free-standing WriteHeader helper that encodes a
-// Kafka response header (correlationId, plus an empty tagged-fields block for
-// flexible versions). Flexibility is determined per apiKey from the response
-// spec's flexibleVersions.
-func emitWriteHeader(e *emitter, specs []*Spec) {
-	e.line("// WriteHeader encodes a Kafka response header (correlation id, plus an empty")
-	e.line("// tagged-fields block for flexible apiVersions). apiKey and apiVersion are")
-	e.line("// only used to decide whether the header is flexible.")
-	e.line("func WriteHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32) {")
+// emitResponseHeaderCodec writes free-standing ReadResponseHeader and
+// WriteResponseHeader helpers. For flexible (apiKey, apiVersion) combinations
+// the read path consumes the trailing tagged-fields count and the write path
+// emits an empty tagged-fields block. Flexibility is determined per apiKey
+// from the response spec's flexibleVersions.
+func emitResponseHeaderCodec(e *emitter, specs []*Spec) {
+	e.line("// ReadResponseHeader decodes a Kafka response header (correlation id, plus")
+	e.line("// the tagged-fields count for flexible apiVersions). apiKey and apiVersion")
+	e.line("// are only used to decide whether the header is flexible.")
+	e.line("func ReadResponseHeader(r *Reader, apiKey int16, apiVersion int16) (corrID int32, err error) {")
+	e.line("\tcorrID, err = r.ReadInt32()")
+	e.line("\tif err != nil { return }")
+	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
+	e.line("\t\tif _, err = r.ReadUvarint(); err != nil { return }")
+	e.line("\t}")
+	e.line("\treturn")
+	e.line("}")
+	e.line("")
+	e.line("// WriteResponseHeader encodes a Kafka response header (correlation id, plus")
+	e.line("// an empty tagged-fields block for flexible apiVersions). apiKey and")
+	e.line("// apiVersion are only used to decide whether the header is flexible.")
+	e.line("func WriteResponseHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32) {")
 	e.line("\tw.WriteInt32(corrID)")
 	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
 	e.line("\t\tw.WriteUvarint(0)")
