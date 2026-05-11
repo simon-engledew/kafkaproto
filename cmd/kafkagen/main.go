@@ -185,7 +185,7 @@ func emitRequestHeaderCodec(e *emitter, specs []*Spec) {
 	e.line("\tclientID, err = r.ReadNullableString()")
 	e.line("\tif err != nil { return }")
 	e.line("\tif requestHeaderFlexible(apiKey, apiVersion) {")
-	e.line("\t\tif _, err = r.ReadUvarint(); err != nil { return }")
+	e.line("\t\tif err = r.ReadTaggedFields(nil); err != nil { return }")
 	e.line("\t}")
 	e.line("\treturn")
 	e.line("}")
@@ -199,7 +199,7 @@ func emitRequestHeaderCodec(e *emitter, specs []*Spec) {
 	e.line("\tw.WriteInt32(corrID)")
 	e.line("\tw.WriteNullableString(clientID)")
 	e.line("\tif requestHeaderFlexible(apiKey, apiVersion) {")
-	e.line("\t\tw.WriteUvarint(0)")
+	e.line("\t\tw.WriteTaggedFields(nil)")
 	e.line("\t}")
 	e.line("}")
 	e.line("")
@@ -224,7 +224,7 @@ func emitResponseHeaderCodec(e *emitter, specs []*Spec) {
 	e.line("\tapiKey, apiVersion, err = lookup(corrID)")
 	e.line("\tif err != nil { return }")
 	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
-	e.line("\t\tif _, err = r.ReadUvarint(); err != nil { return }")
+	e.line("\t\tif err = r.ReadTaggedFields(nil); err != nil { return }")
 	e.line("\t}")
 	e.line("\treturn")
 	e.line("}")
@@ -235,7 +235,7 @@ func emitResponseHeaderCodec(e *emitter, specs []*Spec) {
 	e.line("func WriteResponseHeader(w *Writer, corrID int32, apiKey int16, apiVersion int16) {")
 	e.line("\tw.WriteInt32(corrID)")
 	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
-	e.line("\t\tw.WriteUvarint(0)")
+	e.line("\t\tw.WriteTaggedFields(nil)")
 	e.line("\t}")
 	e.line("}")
 	e.line("")
@@ -261,6 +261,14 @@ func emitFlexibleSwitch(e *emitter, fnName, kind string, specs []*Spec) {
 	e.line("\tswitch apiKey {")
 	for _, k := range keys {
 		s := byKey[k]
+		// KIP-511: the ApiVersions response header is pinned to v0 so an old
+		// client can still parse ErrorCode when the broker speaks a newer
+		// protocol than it understands. The request side is unaffected.
+		if kind == "response" && k == 18 {
+			e.line("\tcase %d: // %s — KIP-511: response header pinned to v0", k, s.Name)
+			e.line("\t\treturn false")
+			continue
+		}
 		cond := s.Flexible.Condition("apiVersion")
 		e.line("\tcase %d: // %s", k, s.Name)
 		e.line("\t\treturn %s", cond)

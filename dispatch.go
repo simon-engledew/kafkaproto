@@ -415,7 +415,7 @@ func ReadRequestHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32,
 		return
 	}
 	if requestHeaderFlexible(apiKey, apiVersion) {
-		if _, err = r.ReadUvarint(); err != nil {
+		if err = r.ReadTaggedFields(nil); err != nil {
 			return
 		}
 	}
@@ -431,7 +431,7 @@ func WriteRequestHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32,
 	w.WriteInt32(corrID)
 	w.WriteNullableString(clientID)
 	if requestHeaderFlexible(apiKey, apiVersion) {
-		w.WriteUvarint(0)
+		w.WriteTaggedFields(nil)
 	}
 }
 
@@ -636,7 +636,7 @@ func ReadResponseHeader(r *Reader, lookup func(corrID int32) (apiKey, apiVersion
 		return
 	}
 	if responseHeaderFlexible(apiKey, apiVersion) {
-		if _, err = r.ReadUvarint(); err != nil {
+		if err = r.ReadTaggedFields(nil); err != nil {
 			return
 		}
 	}
@@ -649,7 +649,7 @@ func ReadResponseHeader(r *Reader, lookup func(corrID int32) (apiKey, apiVersion
 func WriteResponseHeader(w *Writer, corrID int32, apiKey int16, apiVersion int16) {
 	w.WriteInt32(corrID)
 	if responseHeaderFlexible(apiKey, apiVersion) {
-		w.WriteUvarint(0)
+		w.WriteTaggedFields(nil)
 	}
 }
 
@@ -684,8 +684,8 @@ func responseHeaderFlexible(apiKey, apiVersion int16) bool {
 		return apiVersion >= 3
 	case 17: // SaslHandshakeResponse
 		return false
-	case 18: // ApiVersionsResponse
-		return apiVersion >= 3
+	case 18: // ApiVersionsResponse — KIP-511: response header pinned to v0
+		return false
 	case 19: // CreateTopicsResponse
 		return apiVersion >= 5
 	case 20: // DeleteTopicsResponse
