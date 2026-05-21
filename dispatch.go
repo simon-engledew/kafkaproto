@@ -394,6 +394,514 @@ func UnmarshalResponse(r *Reader, apiKey, apiVersion int16) (Message, error) {
 	return m, nil
 }
 
+// ErrorResponse synthesises an error response for req at apiVersion, with
+// errorCode applied to every top-level error field the response exposes:
+// the response's top-level ErrorCode (and ErrorMessage) if present, and one
+// entry per request item for each top-level request array that matches a
+// top-level response array by name and whose elements carry an ErrorCode.
+// Each per-item copy propagates any scalar fields the request and response
+// elements share by name. Returns an error when no response is paired with
+// req's type, or when apiVersion is outside the range in which the response
+// can carry the error on the wire.
+func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage *string) (Message, error) {
+	switch r := req.(type) {
+	case *FetchRequest:
+		_ = r
+		if apiVersion >= 7 && apiVersion <= 18 {
+			m := &FetchResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *MetadataRequest:
+		if apiVersion == 13 || apiVersion <= 13 {
+			m := &MetadataResponse{}
+			if apiVersion == 13 {
+				m.ErrorCode = errorCode
+			}
+			if apiVersion <= 13 {
+				m.Topics = make([]MetadataResponseTopic, len(r.Topics))
+				for i0, it0 := range r.Topics {
+					m.Topics[i0].Name = it0.Name
+					m.Topics[i0].TopicId = it0.TopicId
+					m.Topics[i0].ErrorCode = errorCode
+				}
+			}
+			return m, nil
+		}
+	case *OffsetFetchRequest:
+		if apiVersion >= 2 && apiVersion <= 7 || apiVersion >= 8 && apiVersion <= 10 {
+			m := &OffsetFetchResponse{}
+			if apiVersion >= 2 && apiVersion <= 7 {
+				m.ErrorCode = errorCode
+			}
+			if apiVersion >= 8 && apiVersion <= 10 {
+				m.Groups = make([]OffsetFetchResponseGroup, len(r.Groups))
+				for i0, it0 := range r.Groups {
+					m.Groups[i0].GroupId = it0.GroupId
+					m.Groups[i0].ErrorCode = errorCode
+				}
+			}
+			return m, nil
+		}
+	case *FindCoordinatorRequest:
+		_ = r
+		if apiVersion <= 3 {
+			m := &FindCoordinatorResponse{}
+			m.ErrorCode = errorCode
+			if apiVersion >= 1 && apiVersion <= 3 {
+				m.ErrorMessage = errorMessage
+			}
+			return m, nil
+		}
+	case *JoinGroupRequest:
+		_ = r
+		if apiVersion <= 9 {
+			m := &JoinGroupResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *HeartbeatRequest:
+		_ = r
+		if apiVersion <= 4 {
+			m := &HeartbeatResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *LeaveGroupRequest:
+		if apiVersion <= 5 || apiVersion >= 3 && apiVersion <= 5 {
+			m := &LeaveGroupResponse{}
+			if apiVersion <= 5 {
+				m.ErrorCode = errorCode
+			}
+			if apiVersion >= 3 && apiVersion <= 5 {
+				m.Members = make([]LeaveGroupResponseMemberResponse, len(r.Members))
+				for i0, it0 := range r.Members {
+					m.Members[i0].MemberId = it0.MemberId
+					m.Members[i0].GroupInstanceId = it0.GroupInstanceId
+					m.Members[i0].ErrorCode = errorCode
+				}
+			}
+			return m, nil
+		}
+	case *SyncGroupRequest:
+		_ = r
+		if apiVersion <= 5 {
+			m := &SyncGroupResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *ListGroupsRequest:
+		_ = r
+		if apiVersion <= 5 {
+			m := &ListGroupsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *SaslHandshakeRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &SaslHandshakeResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *ApiVersionsRequest:
+		_ = r
+		if apiVersion <= 5 {
+			m := &ApiVersionsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *CreateTopicsRequest:
+		if apiVersion >= 2 && apiVersion <= 7 {
+			m := &CreateTopicsResponse{}
+			m.Topics = make([]CreateTopicsResponseCreatableTopicResult, len(r.Topics))
+			for i0, it0 := range r.Topics {
+				m.Topics[i0].Name = it0.Name
+				m.Topics[i0].NumPartitions = it0.NumPartitions
+				m.Topics[i0].ReplicationFactor = it0.ReplicationFactor
+				m.Topics[i0].ErrorCode = errorCode
+				m.Topics[i0].ErrorMessage = errorMessage
+			}
+			return m, nil
+		}
+	case *InitProducerIdRequest:
+		_ = r
+		if apiVersion <= 6 {
+			m := &InitProducerIdResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *AddPartitionsToTxnRequest:
+		_ = r
+		if apiVersion >= 4 && apiVersion <= 5 {
+			m := &AddPartitionsToTxnResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *AddOffsetsToTxnRequest:
+		_ = r
+		if apiVersion <= 4 {
+			m := &AddOffsetsToTxnResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *EndTxnRequest:
+		_ = r
+		if apiVersion <= 5 {
+			m := &EndTxnResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeAclsRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 3 {
+			m := &DescribeAclsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *DescribeLogDirsRequest:
+		_ = r
+		if apiVersion >= 3 && apiVersion <= 5 {
+			m := &DescribeLogDirsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *SaslAuthenticateRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &SaslAuthenticateResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *CreateDelegationTokenRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 3 {
+			m := &CreateDelegationTokenResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *RenewDelegationTokenRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 2 {
+			m := &RenewDelegationTokenResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *ExpireDelegationTokenRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 2 {
+			m := &ExpireDelegationTokenResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeDelegationTokenRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 3 {
+			m := &DescribeDelegationTokenResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *ElectLeadersRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 2 {
+			m := &ElectLeadersResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *AlterPartitionReassignmentsRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &AlterPartitionReassignmentsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ListPartitionReassignmentsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &ListPartitionReassignmentsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *OffsetDeleteRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &OffsetDeleteResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeClientQuotasRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &DescribeClientQuotasResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *AlterClientQuotasRequest:
+		if apiVersion <= 1 {
+			m := &AlterClientQuotasResponse{}
+			m.Entries = make([]AlterClientQuotasResponseEntryData, len(r.Entries))
+			for i0 := range r.Entries {
+				m.Entries[i0].ErrorCode = errorCode
+				m.Entries[i0].ErrorMessage = errorMessage
+			}
+			return m, nil
+		}
+	case *DescribeUserScramCredentialsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &DescribeUserScramCredentialsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *VoteRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &VoteResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *BeginQuorumEpochRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &BeginQuorumEpochResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *EndQuorumEpochRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &EndQuorumEpochResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeQuorumRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &DescribeQuorumResponse{}
+			m.ErrorCode = errorCode
+			if apiVersion == 2 {
+				m.ErrorMessage = errorMessage
+			}
+			return m, nil
+		}
+	case *AlterPartitionRequest:
+		_ = r
+		if apiVersion >= 2 && apiVersion <= 3 {
+			m := &AlterPartitionResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *UpdateFeaturesRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &UpdateFeaturesResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *EnvelopeRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &EnvelopeResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *FetchSnapshotRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &FetchSnapshotResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeClusterRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &DescribeClusterResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *BrokerRegistrationRequest:
+		_ = r
+		if apiVersion <= 4 {
+			m := &BrokerRegistrationResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *BrokerHeartbeatRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &BrokerHeartbeatResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *UnregisterBrokerRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &UnregisterBrokerResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ListTransactionsRequest:
+		_ = r
+		if apiVersion <= 2 {
+			m := &ListTransactionsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *AllocateProducerIdsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &AllocateProducerIdsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *ConsumerGroupHeartbeatRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &ConsumerGroupHeartbeatResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ControllerRegistrationRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &ControllerRegistrationResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *GetTelemetrySubscriptionsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &GetTelemetrySubscriptionsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *PushTelemetryRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &PushTelemetryResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *AssignReplicasToDirsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &AssignReplicasToDirsResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *ListConfigResourcesRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &ListConfigResourcesResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeTopicPartitionsRequest:
+		if apiVersion == 0 {
+			m := &DescribeTopicPartitionsResponse{}
+			m.Topics = make([]DescribeTopicPartitionsResponseTopic, len(r.Topics))
+			for i0 := range r.Topics {
+				m.Topics[i0].ErrorCode = errorCode
+			}
+			return m, nil
+		}
+	case *ShareGroupHeartbeatRequest:
+		_ = r
+		if apiVersion == 1 {
+			m := &ShareGroupHeartbeatResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ShareFetchRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 2 {
+			m := &ShareFetchResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ShareAcknowledgeRequest:
+		_ = r
+		if apiVersion >= 1 && apiVersion <= 2 {
+			m := &ShareAcknowledgeResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *AddRaftVoterRequest:
+		_ = r
+		if apiVersion <= 1 {
+			m := &AddRaftVoterResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *RemoveRaftVoterRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &RemoveRaftVoterResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *UpdateRaftVoterRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &UpdateRaftVoterResponse{}
+			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *StreamsGroupHeartbeatRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &StreamsGroupHeartbeatResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *DescribeShareGroupOffsetsRequest:
+		if apiVersion <= 1 {
+			m := &DescribeShareGroupOffsetsResponse{}
+			m.Groups = make([]DescribeShareGroupOffsetsResponseGroup, len(r.Groups))
+			for i0, it0 := range r.Groups {
+				m.Groups[i0].GroupId = it0.GroupId
+				m.Groups[i0].ErrorCode = errorCode
+				m.Groups[i0].ErrorMessage = errorMessage
+			}
+			return m, nil
+		}
+	case *AlterShareGroupOffsetsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &AlterShareGroupOffsetsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *DeleteShareGroupOffsetsRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &DeleteShareGroupOffsetsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	}
+	return nil, fmt.Errorf("kafkaproto: no error response available for %T at apiVersion %d", req, apiVersion)
+}
+
 // ReadRequestHeader decodes a Kafka request header. For flexible (apiKey,
 // apiVersion) combinations it also consumes the trailing tagged-fields count,
 // leaving r positioned at the start of the request body.

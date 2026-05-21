@@ -160,6 +160,8 @@ func EmitDispatch(specs []*Spec) ([]byte, error) {
 	emitDispatchFn(e, "UnmarshalRequest", "request", specs)
 	emitDispatchFn(e, "UnmarshalResponse", "response", specs)
 
+	emitErrorResponseFn(e, specs)
+
 	emitRequestHeaderCodec(e, specs)
 	emitResponseHeaderCodec(e, specs)
 
@@ -277,6 +279,341 @@ func emitFlexibleSwitch(e *emitter, fnName, kind string, specs []*Spec) {
 	e.line("\treturn false")
 	e.line("}")
 	e.line("")
+}
+
+// topLevelField returns the top-level field of s with the given name, or nil.
+func topLevelField(s *Spec, name string) *Field {
+	for _, f := range s.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// elementField returns the named field on a struct-typed array element, or nil.
+func elementField(s *Spec, arr *Field, name string) *Field {
+	if arr.Kind != KindArray || arr.Elem == nil || arr.Elem.Kind != KindStruct {
+		return nil
+	}
+	st := s.Structs[arr.Elem.StructName]
+	if st == nil {
+		return nil
+	}
+	for _, f := range st.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// arrayAction describes a single top-level response array we can populate from
+// the matching top-level request array of the same name. arrayName is the
+// field name in both structs. condition gates whether the iteration is
+// meaningful at apiVersion (the array, its matching request array, and the
+// element's ErrorCode field must all be in scope). msgCondition is non-empty
+// only when the response element has an ErrorMessage field; it gates the
+// assignment to that field inside the loop.
+type arrayAction struct {
+	arrayName    string
+	respElemType string
+	condition    string
+	msgCondition string
+	// scalarCopies lists scalar fields present on both element structs (by
+	// matching name and Kind/Go type) that should be copied from the request
+	// item into the response item.
+	scalarCopies []string
+}
+
+// responseEntry collects everything we need to emit one case clause of
+// ErrorResponse: the request type to type-switch on, the response struct to
+// construct, and the actions (top-level + per-array) that populate it.
+type responseEntry struct {
+	req, resp *Spec
+	// outerCondition gates the entire case body. It is the disjunction of
+	// every action's condition (so at least one action fires whenever it
+	// evaluates true). "true" means unconditional.
+	outerCondition string
+	// topCondition is non-empty iff the response has a top-level ErrorCode
+	// field; it gates `m.ErrorCode = errorCode`.
+	topCondition string
+	// topMsgCondition is non-empty iff the response has a top-level
+	// ErrorMessage field; it gates `m.ErrorMessage = errorMessage`.
+	topMsgCondition string
+	arrays          []arrayAction
+}
+
+// isCopyableScalar reports whether fields of this Kind can be assigned
+// directly from a request struct to a response struct (no allocation or
+// conversion needed).
+func isCopyableScalar(k FieldKind) bool {
+	switch k {
+	case KindBool, KindInt8, KindInt16, KindUint16, KindInt32, KindUint32,
+		KindInt64, KindFloat64, KindString, KindUUID:
+		return true
+	}
+	return false
+}
+
+// buildEntry computes the responseEntry for an (apiKey) request/response pair,
+// or returns false if no error information can be conveyed.
+func buildEntry(req, resp *Spec) (responseEntry, bool) {
+	ent := responseEntry{req: req, resp: resp}
+	var conds []string
+
+	// Top-level ErrorCode.
+	if ec := topLevelField(resp, "ErrorCode"); ec != nil && ec.Kind == KindInt16 {
+		if rng := resp.Valid.Intersect(ec.Versions); !rng.None {
+			ent.topCondition = rng.Condition("apiVersion")
+			conds = append(conds, ent.topCondition)
+			// Top-level ErrorMessage is only meaningful together with
+			// top-level ErrorCode.
+			if em := topLevelField(resp, "ErrorMessage"); em != nil && em.Kind == KindString && !em.Nullable.None {
+				if mrng := rng.Intersect(em.Versions); !mrng.None {
+					ent.topMsgCondition = mrng.Condition("apiVersion")
+				}
+			}
+		}
+	}
+
+	// Top-level array fields with a matching request array, where the element
+	// carries an ErrorCode int16. Only one level of nesting is considered.
+	for _, rf := range resp.Fields {
+		if rf.Kind != KindArray || rf.Elem == nil || rf.Elem.Kind != KindStruct {
+			continue
+		}
+		respEC := elementField(resp, rf, "ErrorCode")
+		if respEC == nil || respEC.Kind != KindInt16 {
+			continue
+		}
+		qf := topLevelField(req, rf.Name)
+		if qf == nil || qf.Kind != KindArray || qf.Elem == nil || qf.Elem.Kind != KindStruct {
+			continue
+		}
+		// Combined range: response array in scope, request array in scope,
+		// and the element's ErrorCode in scope.
+		rng := resp.Valid.Intersect(rf.Versions).Intersect(qf.Versions).Intersect(respEC.Versions)
+		if rng.None {
+			continue
+		}
+		act := arrayAction{
+			arrayName:    rf.Name,
+			respElemType: goTypeName(resp.Name, rf.Elem.StructName),
+			condition:    rng.Condition("apiVersion"),
+		}
+		if em := elementField(resp, rf, "ErrorMessage"); em != nil && em.Kind == KindString && !em.Nullable.None {
+			if mrng := rng.Intersect(em.Versions); !mrng.None {
+				act.msgCondition = mrng.Condition("apiVersion")
+			}
+		}
+		// Identify scalar fields that exist on both element structs with the
+		// same name and Go type — those get copied from the request item to
+		// the response item.
+		respElemS := resp.Structs[rf.Elem.StructName]
+		reqElemS := req.Structs[qf.Elem.StructName]
+		if respElemS != nil && reqElemS != nil {
+			reqByName := map[string]*Field{}
+			for _, x := range reqElemS.Fields {
+				reqByName[x.Name] = x
+			}
+			for _, ef := range respElemS.Fields {
+				if ef.Name == "ErrorCode" || ef.Name == "ErrorMessage" {
+					continue
+				}
+				if !isCopyableScalar(ef.Kind) {
+					continue
+				}
+				qef := reqByName[ef.Name]
+				if qef == nil || qef.Kind != ef.Kind {
+					continue
+				}
+				if goFieldType(resp, ef) != goFieldType(req, qef) {
+					continue
+				}
+				act.scalarCopies = append(act.scalarCopies, ef.Name)
+			}
+		}
+		ent.arrays = append(ent.arrays, act)
+		conds = append(conds, act.condition)
+	}
+
+	if ent.topCondition == "" && len(ent.arrays) == 0 {
+		return responseEntry{}, false
+	}
+
+	// Build the outer condition as the OR of every action's condition.
+	// Collapse to "true" when any action fires unconditionally.
+	outer := strings.Join(uniqueNonEmpty(conds), " || ")
+	for _, c := range conds {
+		if c == "true" {
+			outer = "true"
+			break
+		}
+	}
+	ent.outerCondition = outer
+	return ent, true
+}
+
+func uniqueNonEmpty(in []string) []string {
+	seen := map[string]bool{}
+	out := in[:0]
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// emitErrorResponseFn writes the ErrorResponse helper, which builds a response
+// for the supplied request with errorCode (and errorMessage when present)
+// applied to every top-level error field the response exposes — both a
+// top-level ErrorCode/ErrorMessage if the response has them, and one entry
+// per request item for each top-level request array that matches a top-level
+// response array (by name) whose elements carry an ErrorCode field. Each
+// per-item copy also propagates any scalar fields the request and response
+// elements share by name (e.g. the topic Name on CreateTopics).
+//
+// A request type is omitted from the switch when no top-level error can be
+// expressed for it — most commonly when the response error lives deeper than
+// one level of nesting or when the request array name differs from the
+// response array name.
+func emitErrorResponseFn(e *emitter, specs []*Spec) {
+	// Pair up request and response by apiKey.
+	type pair struct{ req, resp *Spec }
+	pairs := map[int]pair{}
+	for _, s := range specs {
+		if !s.HasAPIKey {
+			continue
+		}
+		p := pairs[s.APIKey]
+		switch s.Type {
+		case "request":
+			p.req = s
+		case "response":
+			p.resp = s
+		}
+		pairs[s.APIKey] = p
+	}
+
+	entries := map[int]responseEntry{}
+	for k, p := range pairs {
+		if p.req == nil || p.resp == nil {
+			continue
+		}
+		ent, ok := buildEntry(p.req, p.resp)
+		if !ok {
+			continue
+		}
+		entries[k] = ent
+	}
+	keys := make([]int, 0, len(entries))
+	for k := range entries {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	e.line("// ErrorResponse synthesises an error response for req at apiVersion, with")
+	e.line("// errorCode applied to every top-level error field the response exposes:")
+	e.line("// the response's top-level ErrorCode (and ErrorMessage) if present, and one")
+	e.line("// entry per request item for each top-level request array that matches a")
+	e.line("// top-level response array by name and whose elements carry an ErrorCode.")
+	e.line("// Each per-item copy propagates any scalar fields the request and response")
+	e.line("// elements share by name. Returns an error when no response is paired with")
+	e.line("// req's type, or when apiVersion is outside the range in which the response")
+	e.line("// can carry the error on the wire.")
+	e.line("func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage *string) (Message, error) {")
+	e.line("\tswitch r := req.(type) {")
+	for _, k := range keys {
+		ent := entries[k]
+		e.line("\tcase *%s:", ent.req.Name)
+		// If we'll never reference r in this case body (no array actions), the
+		// type switch still allows the unused binding — Go does not flag case
+		// variables. But emitting a discard keeps the generated code obvious.
+		if len(ent.arrays) == 0 {
+			e.line("\t\t_ = r")
+		}
+		indent := "\t\t"
+		if ent.outerCondition != "true" {
+			e.line("\t\tif %s {", ent.outerCondition)
+			indent = "\t\t\t"
+		}
+		e.line("%sm := &%s{}", indent, ent.resp.Name)
+		emitEntryBody(e, ent, indent)
+		e.line("%sreturn m, nil", indent)
+		if ent.outerCondition != "true" {
+			e.line("\t\t}")
+		}
+	}
+	e.line("\t}")
+	e.line("\treturn nil, fmt.Errorf(\"kafkaproto: no error response available for %%T at apiVersion %%d\", req, apiVersion)")
+	e.line("}")
+	e.line("")
+}
+
+// emitEntryBody writes the populate statements inside a case, gating each
+// action with its own condition when it's narrower than the outer condition.
+func emitEntryBody(e *emitter, ent responseEntry, indent string) {
+	// Top-level ErrorCode.
+	if ent.topCondition != "" {
+		emitGated(e, indent, ent.topCondition, ent.outerCondition, func(inner string) {
+			e.line("%sm.ErrorCode = errorCode", inner)
+			if ent.topMsgCondition != "" && ent.topMsgCondition == ent.topCondition {
+				e.line("%sm.ErrorMessage = errorMessage", inner)
+			}
+		})
+		// ErrorMessage with a strictly narrower range needs its own gate.
+		if ent.topMsgCondition != "" && ent.topMsgCondition != ent.topCondition {
+			emitGated(e, indent, ent.topMsgCondition, ent.outerCondition, func(inner string) {
+				e.line("%sm.ErrorMessage = errorMessage", inner)
+			})
+		}
+	}
+
+	// Per-array iterations.
+	for i, act := range ent.arrays {
+		idx := fmt.Sprintf("i%d", i)
+		item := fmt.Sprintf("it%d", i)
+		emitGated(e, indent, act.condition, ent.outerCondition, func(inner string) {
+			e.line("%sm.%s = make([]%s, len(r.%s))", inner, act.arrayName, act.respElemType, act.arrayName)
+			if len(act.scalarCopies) == 0 {
+				e.line("%sfor %s := range r.%s {", inner, idx, act.arrayName)
+			} else {
+				e.line("%sfor %s, %s := range r.%s {", inner, idx, item, act.arrayName)
+			}
+			body := inner + "\t"
+			for _, name := range act.scalarCopies {
+				e.line("%sm.%s[%s].%s = %s.%s", body, act.arrayName, idx, name, item, name)
+			}
+			e.line("%sm.%s[%s].ErrorCode = errorCode", body, act.arrayName, idx)
+			if act.msgCondition != "" {
+				if act.msgCondition == act.condition {
+					e.line("%sm.%s[%s].ErrorMessage = errorMessage", body, act.arrayName, idx)
+				} else {
+					e.line("%sif %s {", body, act.msgCondition)
+					e.line("%s\tm.%s[%s].ErrorMessage = errorMessage", body, act.arrayName, idx)
+					e.line("%s}", body)
+				}
+			}
+			e.line("%s}", inner)
+		})
+	}
+}
+
+// emitGated emits body inside an `if cond { ... }` block, unless cond is
+// already implied by outer (or is trivially "true"), in which case body is
+// emitted directly at indent.
+func emitGated(e *emitter, indent, cond, outer string, body func(inner string)) {
+	if cond == "true" || cond == outer {
+		body(indent)
+		return
+	}
+	e.line("%sif %s {", indent, cond)
+	body(indent + "\t")
+	e.line("%s}", indent)
 }
 
 func emitDispatchFn(e *emitter, fnName, kind string, specs []*Spec) {
