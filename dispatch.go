@@ -524,6 +524,30 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			}
 			return m, nil
 		}
+	case *DeleteTopicsRequest:
+		switch {
+		case apiVersion == 6:
+			m := &DeleteTopicsResponse{}
+			m.Responses = make([]DeleteTopicsResponseDeletableTopicResult, len(r.Topics))
+			for i0, it0 := range r.Topics {
+				m.Responses[i0].Name = it0.Name
+				m.Responses[i0].TopicId = it0.TopicId
+				m.Responses[i0].ErrorCode = errorCode
+				m.Responses[i0].ErrorMessage = errorMessage
+			}
+			return m, nil
+		case apiVersion >= 1 && apiVersion <= 5:
+			m := &DeleteTopicsResponse{}
+			m.Responses = make([]DeleteTopicsResponseDeletableTopicResult, len(r.TopicNames))
+			for i0, name0 := range r.TopicNames {
+				m.Responses[i0].Name = &name0
+				m.Responses[i0].ErrorCode = errorCode
+				if apiVersion == 5 {
+					m.Responses[i0].ErrorMessage = errorMessage
+				}
+			}
+			return m, nil
+		}
 	case *InitProducerIdRequest:
 		_ = r
 		if apiVersion <= 6 {

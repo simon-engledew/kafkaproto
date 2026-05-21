@@ -479,8 +479,9 @@ func uniqueNonEmpty(in []string) []string {
 //
 // A request type is omitted from the switch when no top-level error can be
 // expressed for it — most commonly when the response error lives deeper than
-// one level of nesting or when the request array name differs from the
-// response array name.
+// one level of nesting, or when the request array name differs from the
+// response array name. A small set of hand-coded special cases covers
+// well-known field-name mismatches (see specialCaseEmitters).
 func emitErrorResponseFn(e *emitter, specs []*Spec) {
 	// Pair up request and response by apiKey.
 	type pair struct{ req, resp *Spec }
@@ -504,15 +505,34 @@ func emitErrorResponseFn(e *emitter, specs []*Spec) {
 		if p.req == nil || p.resp == nil {
 			continue
 		}
+		// Hand-coded cases own their case clause entirely; skip generic logic
+		// so we don't emit two case clauses for the same request type.
+		if _, ok := specialCaseEmitters[k]; ok {
+			continue
+		}
 		ent, ok := buildEntry(p.req, p.resp)
 		if !ok {
 			continue
 		}
 		entries[k] = ent
 	}
-	keys := make([]int, 0, len(entries))
+
+	keySeen := map[int]bool{}
+	var keys []int
 	for k := range entries {
-		keys = append(keys, k)
+		if !keySeen[k] {
+			keySeen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	for k := range specialCaseEmitters {
+		if _, ok := pairs[k]; !ok {
+			continue
+		}
+		if !keySeen[k] {
+			keySeen[k] = true
+			keys = append(keys, k)
+		}
 	}
 	sort.Ints(keys)
 
@@ -528,6 +548,11 @@ func emitErrorResponseFn(e *emitter, specs []*Spec) {
 	e.line("func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage *string) (Message, error) {")
 	e.line("\tswitch r := req.(type) {")
 	for _, k := range keys {
+		if fn, ok := specialCaseEmitters[k]; ok {
+			p := pairs[k]
+			fn(e, p.req, p.resp)
+			continue
+		}
 		ent := entries[k]
 		e.line("\tcase *%s:", ent.req.Name)
 		// If we'll never reference r in this case body (no array actions), the
@@ -552,6 +577,95 @@ func emitErrorResponseFn(e *emitter, specs []*Spec) {
 	e.line("\treturn nil, fmt.Errorf(\"kafkaproto: no error response available for %%T at apiVersion %%d\", req, apiVersion)")
 	e.line("}")
 	e.line("")
+}
+
+// specialCaseEmitters holds apiKeys whose request/response field names don't
+// line up well enough for the generic name-based matcher in buildEntry. Each
+// entry owns its full case clause inside the ErrorResponse switch.
+var specialCaseEmitters = map[int]func(e *emitter, req, resp *Spec){
+	20: emitDeleteTopicsCase,
+}
+
+// emitDeleteTopicsCase hand-codes the DeleteTopics (apiKey 20) case. The
+// request carries topics in `Topics` ([]DeleteTopicState, v6+) or
+// `TopicNames` ([]string, v0-5), while the response always uses `Responses`
+// ([]DeletableTopicResult) — three different field names, two different
+// element shapes, so the generic name-match in buildEntry can't pair them
+// up.
+//
+// Type names are taken from the parsed specs so a rename in the JSON catalog
+// flows through; only the field routing (which request field feeds which
+// response field at which versions) is fixed.
+func emitDeleteTopicsCase(e *emitter, req, resp *Spec) {
+	respArr := topLevelField(resp, "Responses")
+	if respArr == nil || respArr.Elem == nil {
+		return
+	}
+	elemType := goTypeName(resp.Name, respArr.Elem.StructName)
+
+	topicsCond := req.Valid.Intersect(topLevelField(req, "Topics").Versions).
+		Intersect(resp.Valid).Condition("apiVersion")
+	namesCond := req.Valid.Intersect(topLevelField(req, "TopicNames").Versions).
+		Intersect(resp.Valid).Condition("apiVersion")
+
+	// ErrorMessage on the response element — version range intersected with
+	// validVersions. Within the Topics branch this is always satisfied
+	// (Topics is v6+, ErrorMessage is v5+); within the TopicNames branch it
+	// gates on whether apiVersion has crossed into the ErrorMessage range.
+	errMsgRange := resp.Valid
+	if em := findElemField(resp, respArr, "ErrorMessage"); em != nil {
+		errMsgRange = errMsgRange.Intersect(em.Versions)
+	}
+	namesMsgRange := errMsgRange.Intersect(topLevelField(req, "TopicNames").Versions)
+
+	e.line("\tcase *%s:", req.Name)
+	e.line("\t\tswitch {")
+	e.line("\t\tcase %s:", topicsCond)
+	e.line("\t\t\tm := &%s{}", resp.Name)
+	e.line("\t\t\tm.Responses = make([]%s, len(r.Topics))", elemType)
+	e.line("\t\t\tfor i0, it0 := range r.Topics {")
+	e.line("\t\t\t\tm.Responses[i0].Name = it0.Name")
+	e.line("\t\t\t\tm.Responses[i0].TopicId = it0.TopicId")
+	e.line("\t\t\t\tm.Responses[i0].ErrorCode = errorCode")
+	e.line("\t\t\t\tm.Responses[i0].ErrorMessage = errorMessage")
+	e.line("\t\t\t}")
+	e.line("\t\t\treturn m, nil")
+	e.line("\t\tcase %s:", namesCond)
+	e.line("\t\t\tm := &%s{}", resp.Name)
+	e.line("\t\t\tm.Responses = make([]%s, len(r.TopicNames))", elemType)
+	e.line("\t\t\tfor i0, name0 := range r.TopicNames {")
+	e.line("\t\t\t\tm.Responses[i0].Name = &name0")
+	e.line("\t\t\t\tm.Responses[i0].ErrorCode = errorCode")
+	if !namesMsgRange.None {
+		nmCond := namesMsgRange.Condition("apiVersion")
+		if nmCond == "true" || nmCond == namesCond {
+			e.line("\t\t\t\tm.Responses[i0].ErrorMessage = errorMessage")
+		} else {
+			e.line("\t\t\t\tif %s {", nmCond)
+			e.line("\t\t\t\t\tm.Responses[i0].ErrorMessage = errorMessage")
+			e.line("\t\t\t\t}")
+		}
+	}
+	e.line("\t\t\t}")
+	e.line("\t\t\treturn m, nil")
+	e.line("\t\t}")
+}
+
+// findElemField looks up a named field on a struct-typed array element.
+func findElemField(spec *Spec, arr *Field, name string) *Field {
+	if arr == nil || arr.Elem == nil || arr.Elem.Kind != KindStruct {
+		return nil
+	}
+	st := spec.Structs[arr.Elem.StructName]
+	if st == nil {
+		return nil
+	}
+	for _, f := range st.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
 }
 
 // emitEntryBody writes the populate statements inside a case, gating each
