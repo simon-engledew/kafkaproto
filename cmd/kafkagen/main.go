@@ -308,22 +308,36 @@ func elementField(s *Spec, arr *Field, name string) *Field {
 	return nil
 }
 
-// arrayAction describes a single top-level response array we can populate from
-// the matching top-level request array of the same name. arrayName is the
-// field name in both structs. condition gates whether the iteration is
-// meaningful at apiVersion (the array, its matching request array, and the
-// element's ErrorCode field must all be in scope). msgCondition is non-empty
-// only when the response element has an ErrorMessage field; it gates the
-// assignment to that field inside the loop.
+// arrayAction describes the population of one top-level response array from
+// one top-level request array. The two arrays may have different names when
+// the action comes from the single-array fallback (see buildEntry). Items are
+// always appended to the response array, so multiple actions can coexist —
+// for instance AlterUserScramCredentials feeds both Deletions and Upsertions
+// into the same Results array.
 type arrayAction struct {
-	arrayName    string
-	respElemType string
-	condition    string
-	msgCondition string
-	// scalarCopies lists scalar fields present on both element structs (by
-	// matching name and Kind/Go type) that should be copied from the request
-	// item into the response item.
-	scalarCopies []string
+	respArrayName string // field name on the response struct
+	reqArrayName  string // field name on the request struct (often equal)
+	respElemType  string
+	condition     string
+	msgCondition  string
+	// reqElemIsStruct is false when the request array is a scalar slice (e.g.
+	// []string). copies then reference the loop value directly via source="".
+	reqElemIsStruct bool
+	copies          []copyOp
+}
+
+// copyOp describes one scalar assignment from a request loop binding into a
+// response element field.
+type copyOp struct {
+	// respField is the name of the field on the response element to assign.
+	respField string
+	// source is the name of the field on the request element (when iterating
+	// a struct array), or "" to mean the loop value itself (when iterating a
+	// scalar slice).
+	source string
+	// takeAddress emits a leading `&` — used when the request supplies a
+	// string and the response stores a *string.
+	takeAddress bool
 }
 
 // responseEntry collects everything we need to emit one case clause of
@@ -358,15 +372,33 @@ func isCopyableScalar(k FieldKind) bool {
 
 // buildEntry computes the responseEntry for an (apiKey) request/response pair,
 // or returns false if no error information can be conveyed.
+//
+// Matching has two modes:
+//
+//  1. Name-matched: for every top-level response array with an ErrorCode in
+//     its element struct, look for a top-level request array with the same
+//     name. Used for any response whose error info isn't carried only by a
+//     single per-item array (i.e. when there's a top-level ErrorCode and/or
+//     multiple top-level arrays in the response).
+//
+//  2. Single-array fallback: when the response has no top-level ErrorCode and
+//     exactly one top-level array (with an ErrorCode-bearing element), any
+//     top-level request array may feed into it regardless of name. Scalar
+//     []string request arrays are paired to a response element field via
+//     entityType. This covers DeleteTopics (Topics + TopicNames → Responses),
+//     DescribeGroups family (GroupIds → Groups), CreateAcls (Creations →
+//     Results), and similar shapes.
 func buildEntry(req, resp *Spec) (responseEntry, bool) {
 	ent := responseEntry{req: req, resp: resp}
 	var conds []string
 
 	// Top-level ErrorCode.
+	hasTopErrorCode := false
 	if ec := topLevelField(resp, "ErrorCode"); ec != nil && ec.Kind == KindInt16 {
 		if rng := resp.Valid.Intersect(ec.Versions); !rng.None {
 			ent.topCondition = rng.Condition("apiVersion")
 			conds = append(conds, ent.topCondition)
+			hasTopErrorCode = true
 			// Top-level ErrorMessage is only meaningful together with
 			// top-level ErrorCode.
 			if em := topLevelField(resp, "ErrorMessage"); em != nil && em.Kind == KindString && !em.Nullable.None {
@@ -377,65 +409,49 @@ func buildEntry(req, resp *Spec) (responseEntry, bool) {
 		}
 	}
 
-	// Top-level array fields with a matching request array, where the element
-	// carries an ErrorCode int16. Only one level of nesting is considered.
+	// Collect top-level response arrays whose element struct carries an
+	// int16 ErrorCode. Anything else can't convey a per-item error.
+	var respArrays []*Field
 	for _, rf := range resp.Fields {
 		if rf.Kind != KindArray || rf.Elem == nil || rf.Elem.Kind != KindStruct {
 			continue
 		}
-		respEC := elementField(resp, rf, "ErrorCode")
-		if respEC == nil || respEC.Kind != KindInt16 {
+		if ec := elementField(resp, rf, "ErrorCode"); ec == nil || ec.Kind != KindInt16 {
 			continue
 		}
-		qf := topLevelField(req, rf.Name)
-		if qf == nil || qf.Kind != KindArray || qf.Elem == nil || qf.Elem.Kind != KindStruct {
-			continue
-		}
-		// Combined range: response array in scope, request array in scope,
-		// and the element's ErrorCode in scope.
-		rng := resp.Valid.Intersect(rf.Versions).Intersect(qf.Versions).Intersect(respEC.Versions)
-		if rng.None {
-			continue
-		}
-		act := arrayAction{
-			arrayName:    rf.Name,
-			respElemType: goTypeName(resp.Name, rf.Elem.StructName),
-			condition:    rng.Condition("apiVersion"),
-		}
-		if em := elementField(resp, rf, "ErrorMessage"); em != nil && em.Kind == KindString && !em.Nullable.None {
-			if mrng := rng.Intersect(em.Versions); !mrng.None {
-				act.msgCondition = mrng.Condition("apiVersion")
+		respArrays = append(respArrays, rf)
+	}
+
+	switch {
+	case !hasTopErrorCode && len(respArrays) == 1:
+		// Single-array fallback: feed every top-level request array into the
+		// one response array, regardless of name.
+		respArr := respArrays[0]
+		for _, qf := range req.Fields {
+			if qf.Kind != KindArray {
+				continue
 			}
-		}
-		// Identify scalar fields that exist on both element structs with the
-		// same name and Go type — those get copied from the request item to
-		// the response item.
-		respElemS := resp.Structs[rf.Elem.StructName]
-		reqElemS := req.Structs[qf.Elem.StructName]
-		if respElemS != nil && reqElemS != nil {
-			reqByName := map[string]*Field{}
-			for _, x := range reqElemS.Fields {
-				reqByName[x.Name] = x
+			act := buildArrayAction(resp, respArr, req, qf, true)
+			if act == nil {
+				continue
 			}
-			for _, ef := range respElemS.Fields {
-				if ef.Name == "ErrorCode" || ef.Name == "ErrorMessage" {
-					continue
-				}
-				if !isCopyableScalar(ef.Kind) {
-					continue
-				}
-				qef := reqByName[ef.Name]
-				if qef == nil || qef.Kind != ef.Kind {
-					continue
-				}
-				if goFieldType(resp, ef) != goFieldType(req, qef) {
-					continue
-				}
-				act.scalarCopies = append(act.scalarCopies, ef.Name)
-			}
+			ent.arrays = append(ent.arrays, *act)
+			conds = append(conds, act.condition)
 		}
-		ent.arrays = append(ent.arrays, act)
-		conds = append(conds, act.condition)
+	default:
+		// Name-matched: pair each response array with a same-named request array.
+		for _, rf := range respArrays {
+			qf := topLevelField(req, rf.Name)
+			if qf == nil || qf.Kind != KindArray {
+				continue
+			}
+			act := buildArrayAction(resp, rf, req, qf, false)
+			if act == nil {
+				continue
+			}
+			ent.arrays = append(ent.arrays, *act)
+			conds = append(conds, act.condition)
+		}
 	}
 
 	if ent.topCondition == "" && len(ent.arrays) == 0 {
@@ -455,6 +471,150 @@ func buildEntry(req, resp *Spec) (responseEntry, bool) {
 	return ent, true
 }
 
+// buildArrayAction constructs an arrayAction for one (request array, response
+// array) pair. fallback=true relaxes element-kind requirements so we can
+// handle []string request arrays in the single-array fallback mode. Returns
+// nil when the pair can't be wired up at any version.
+func buildArrayAction(resp *Spec, respArr *Field, req *Spec, reqArr *Field, fallback bool) *arrayAction {
+	if reqArr.Elem == nil {
+		return nil
+	}
+	respEC := elementField(resp, respArr, "ErrorCode")
+	if respEC == nil {
+		return nil
+	}
+
+	// In name-matched mode both sides must be struct arrays so we can pair
+	// fields by name. In the single-array fallback we also accept scalar
+	// request slices (typically []string with an entityType).
+	reqElemIsStruct := reqArr.Elem.Kind == KindStruct
+	if !reqElemIsStruct && !fallback {
+		return nil
+	}
+	if !reqElemIsStruct && !isCopyableScalar(reqArr.Elem.Kind) {
+		return nil
+	}
+
+	rng := resp.Valid.Intersect(respArr.Versions).Intersect(reqArr.Versions).Intersect(respEC.Versions)
+	if rng.None {
+		return nil
+	}
+
+	act := &arrayAction{
+		respArrayName:   respArr.Name,
+		reqArrayName:    reqArr.Name,
+		respElemType:    goTypeName(resp.Name, respArr.Elem.StructName),
+		condition:       rng.Condition("apiVersion"),
+		reqElemIsStruct: reqElemIsStruct,
+	}
+	if em := elementField(resp, respArr, "ErrorMessage"); em != nil && em.Kind == KindString && !em.Nullable.None {
+		if mrng := rng.Intersect(em.Versions); !mrng.None {
+			act.msgCondition = mrng.Condition("apiVersion")
+		}
+	}
+
+	respElemS := resp.Structs[respArr.Elem.StructName]
+	if respElemS == nil {
+		return act
+	}
+	if reqElemIsStruct {
+		reqElemS := req.Structs[reqArr.Elem.StructName]
+		if reqElemS != nil {
+			act.copies = structCopies(resp, respElemS, req, reqElemS)
+		}
+	} else if op := scalarCopy(resp, respElemS, reqArr.Elem); op != nil {
+		act.copies = []copyOp{*op}
+	}
+	return act
+}
+
+// structCopies derives the per-field assignments to make when the request
+// element is also a struct. Fields are matched by name first; failing that,
+// by entityType so the spec's semantic links (topicName, groupId, …) carry
+// across renames like Deletions.Name ↦ Results.User.
+func structCopies(resp *Spec, respElemS *Struct, req *Spec, reqElemS *Struct) []copyOp {
+	reqByName := map[string]*Field{}
+	reqByEntity := map[string]*Field{}
+	for _, x := range reqElemS.Fields {
+		reqByName[x.Name] = x
+		if x.EntityType != "" {
+			reqByEntity[x.EntityType] = x
+		}
+	}
+	used := map[string]bool{} // request field names already claimed
+	var out []copyOp
+	for _, ef := range respElemS.Fields {
+		if ef.Name == "ErrorCode" || ef.Name == "ErrorMessage" {
+			continue
+		}
+		if !isCopyableScalar(ef.Kind) {
+			continue
+		}
+		if qef, ok := reqByName[ef.Name]; ok && !used[qef.Name] {
+			if op := buildScalarOp(resp, ef, req, qef, ef.Name); op != nil {
+				out = append(out, *op)
+				used[qef.Name] = true
+				continue
+			}
+		}
+		if ef.EntityType != "" {
+			if qef, ok := reqByEntity[ef.EntityType]; ok && !used[qef.Name] {
+				if op := buildScalarOp(resp, ef, req, qef, qef.Name); op != nil {
+					out = append(out, *op)
+					used[qef.Name] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+// scalarCopy builds the single assignment for a scalar request slice (e.g.
+// []string) by finding a response element field whose entityType matches
+// the slice's entityType.
+func scalarCopy(resp *Spec, respElemS *Struct, reqElem *Field) *copyOp {
+	if reqElem.EntityType == "" {
+		return nil
+	}
+	for _, ef := range respElemS.Fields {
+		if ef.EntityType != reqElem.EntityType {
+			continue
+		}
+		if !isCopyableScalar(ef.Kind) || ef.Kind != reqElem.Kind {
+			continue
+		}
+		op := &copyOp{respField: ef.Name, source: ""}
+		// String scalars in the request are always plain `string`; the
+		// response field may be *string when nullable.
+		if ef.Kind == KindString && goFieldType(resp, ef) == "*string" {
+			op.takeAddress = true
+		}
+		return op
+	}
+	return nil
+}
+
+// buildScalarOp constructs a copyOp for matching scalar fields, handling the
+// common *string vs string mismatch by taking the address of the request
+// value. source is the field name on the request element to read from.
+func buildScalarOp(resp *Spec, ef *Field, req *Spec, qef *Field, source string) *copyOp {
+	if ef.Kind != qef.Kind {
+		return nil
+	}
+	respGo := goFieldType(resp, ef)
+	reqGo := goFieldType(req, qef)
+	if respGo == reqGo {
+		return &copyOp{respField: ef.Name, source: source}
+	}
+	// *string ← string: take the address of the request field.
+	if ef.Kind == KindString && respGo == "*string" && reqGo == "string" {
+		return &copyOp{respField: ef.Name, source: source, takeAddress: true}
+	}
+	// Other type mismatches (e.g. string ← *string requires nil checks) are
+	// skipped to keep the generator honest about what it can synthesise.
+	return nil
+}
+
 func uniqueNonEmpty(in []string) []string {
 	seen := map[string]bool{}
 	out := in[:0]
@@ -468,20 +628,12 @@ func uniqueNonEmpty(in []string) []string {
 	return out
 }
 
-// emitErrorResponseFn writes the ErrorResponse helper, which builds a response
-// for the supplied request with errorCode (and errorMessage when present)
-// applied to every top-level error field the response exposes — both a
-// top-level ErrorCode/ErrorMessage if the response has them, and one entry
-// per request item for each top-level request array that matches a top-level
-// response array (by name) whose elements carry an ErrorCode field. Each
-// per-item copy also propagates any scalar fields the request and response
-// elements share by name (e.g. the topic Name on CreateTopics).
-//
-// A request type is omitted from the switch when no top-level error can be
-// expressed for it — most commonly when the response error lives deeper than
-// one level of nesting, or when the request array name differs from the
-// response array name. A small set of hand-coded special cases covers
-// well-known field-name mismatches (see specialCaseEmitters).
+// emitErrorResponseFn writes the ErrorResponse helper: dispatch on the
+// request type and build a response populated with errorCode (and
+// errorMessage when applicable) — at the top level when the response carries
+// ErrorCode/ErrorMessage directly, and per-item for each top-level request
+// array that maps into a top-level response array. See buildEntry for the
+// matching rules.
 func emitErrorResponseFn(e *emitter, specs []*Spec) {
 	// Pair up request and response by apiKey.
 	type pair struct{ req, resp *Spec }
@@ -505,54 +657,32 @@ func emitErrorResponseFn(e *emitter, specs []*Spec) {
 		if p.req == nil || p.resp == nil {
 			continue
 		}
-		// Hand-coded cases own their case clause entirely; skip generic logic
-		// so we don't emit two case clauses for the same request type.
-		if _, ok := specialCaseEmitters[k]; ok {
-			continue
-		}
 		ent, ok := buildEntry(p.req, p.resp)
 		if !ok {
 			continue
 		}
 		entries[k] = ent
 	}
-
-	keySeen := map[int]bool{}
-	var keys []int
+	keys := make([]int, 0, len(entries))
 	for k := range entries {
-		if !keySeen[k] {
-			keySeen[k] = true
-			keys = append(keys, k)
-		}
-	}
-	for k := range specialCaseEmitters {
-		if _, ok := pairs[k]; !ok {
-			continue
-		}
-		if !keySeen[k] {
-			keySeen[k] = true
-			keys = append(keys, k)
-		}
+		keys = append(keys, k)
 	}
 	sort.Ints(keys)
 
 	e.line("// ErrorResponse synthesises an error response for req at apiVersion, with")
 	e.line("// errorCode applied to every top-level error field the response exposes:")
-	e.line("// the response's top-level ErrorCode (and ErrorMessage) if present, and one")
-	e.line("// entry per request item for each top-level request array that matches a")
-	e.line("// top-level response array by name and whose elements carry an ErrorCode.")
-	e.line("// Each per-item copy propagates any scalar fields the request and response")
-	e.line("// elements share by name. Returns an error when no response is paired with")
-	e.line("// req's type, or when apiVersion is outside the range in which the response")
-	e.line("// can carry the error on the wire.")
+	e.line("// the response's top-level ErrorCode (and ErrorMessage) when present, and")
+	e.line("// one entry per request item for each top-level request array that maps")
+	e.line("// into a top-level response array. Same-named arrays pair up directly; if")
+	e.line("// the response has just a single top-level array and no top-level")
+	e.line("// ErrorCode, any top-level request array (struct or scalar slice) is fed")
+	e.line("// into it, with scalar copies propagated by matching field name or by the")
+	e.line("// spec's entityType annotation. Returns an error when no response is")
+	e.line("// paired with req's type, or when apiVersion is outside the range in which")
+	e.line("// the response can carry the error on the wire.")
 	e.line("func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage *string) (Message, error) {")
 	e.line("\tswitch r := req.(type) {")
 	for _, k := range keys {
-		if fn, ok := specialCaseEmitters[k]; ok {
-			p := pairs[k]
-			fn(e, p.req, p.resp)
-			continue
-		}
 		ent := entries[k]
 		e.line("\tcase *%s:", ent.req.Name)
 		// If we'll never reference r in this case body (no array actions), the
@@ -579,95 +709,6 @@ func emitErrorResponseFn(e *emitter, specs []*Spec) {
 	e.line("")
 }
 
-// specialCaseEmitters holds apiKeys whose request/response field names don't
-// line up well enough for the generic name-based matcher in buildEntry. Each
-// entry owns its full case clause inside the ErrorResponse switch.
-var specialCaseEmitters = map[int]func(e *emitter, req, resp *Spec){
-	20: emitDeleteTopicsCase,
-}
-
-// emitDeleteTopicsCase hand-codes the DeleteTopics (apiKey 20) case. The
-// request carries topics in `Topics` ([]DeleteTopicState, v6+) or
-// `TopicNames` ([]string, v0-5), while the response always uses `Responses`
-// ([]DeletableTopicResult) — three different field names, two different
-// element shapes, so the generic name-match in buildEntry can't pair them
-// up.
-//
-// Type names are taken from the parsed specs so a rename in the JSON catalog
-// flows through; only the field routing (which request field feeds which
-// response field at which versions) is fixed.
-func emitDeleteTopicsCase(e *emitter, req, resp *Spec) {
-	respArr := topLevelField(resp, "Responses")
-	if respArr == nil || respArr.Elem == nil {
-		return
-	}
-	elemType := goTypeName(resp.Name, respArr.Elem.StructName)
-
-	topicsCond := req.Valid.Intersect(topLevelField(req, "Topics").Versions).
-		Intersect(resp.Valid).Condition("apiVersion")
-	namesCond := req.Valid.Intersect(topLevelField(req, "TopicNames").Versions).
-		Intersect(resp.Valid).Condition("apiVersion")
-
-	// ErrorMessage on the response element — version range intersected with
-	// validVersions. Within the Topics branch this is always satisfied
-	// (Topics is v6+, ErrorMessage is v5+); within the TopicNames branch it
-	// gates on whether apiVersion has crossed into the ErrorMessage range.
-	errMsgRange := resp.Valid
-	if em := findElemField(resp, respArr, "ErrorMessage"); em != nil {
-		errMsgRange = errMsgRange.Intersect(em.Versions)
-	}
-	namesMsgRange := errMsgRange.Intersect(topLevelField(req, "TopicNames").Versions)
-
-	e.line("\tcase *%s:", req.Name)
-	e.line("\t\tswitch {")
-	e.line("\t\tcase %s:", topicsCond)
-	e.line("\t\t\tm := &%s{}", resp.Name)
-	e.line("\t\t\tm.Responses = make([]%s, len(r.Topics))", elemType)
-	e.line("\t\t\tfor i0, it0 := range r.Topics {")
-	e.line("\t\t\t\tm.Responses[i0].Name = it0.Name")
-	e.line("\t\t\t\tm.Responses[i0].TopicId = it0.TopicId")
-	e.line("\t\t\t\tm.Responses[i0].ErrorCode = errorCode")
-	e.line("\t\t\t\tm.Responses[i0].ErrorMessage = errorMessage")
-	e.line("\t\t\t}")
-	e.line("\t\t\treturn m, nil")
-	e.line("\t\tcase %s:", namesCond)
-	e.line("\t\t\tm := &%s{}", resp.Name)
-	e.line("\t\t\tm.Responses = make([]%s, len(r.TopicNames))", elemType)
-	e.line("\t\t\tfor i0, name0 := range r.TopicNames {")
-	e.line("\t\t\t\tm.Responses[i0].Name = &name0")
-	e.line("\t\t\t\tm.Responses[i0].ErrorCode = errorCode")
-	if !namesMsgRange.None {
-		nmCond := namesMsgRange.Condition("apiVersion")
-		if nmCond == "true" || nmCond == namesCond {
-			e.line("\t\t\t\tm.Responses[i0].ErrorMessage = errorMessage")
-		} else {
-			e.line("\t\t\t\tif %s {", nmCond)
-			e.line("\t\t\t\t\tm.Responses[i0].ErrorMessage = errorMessage")
-			e.line("\t\t\t\t}")
-		}
-	}
-	e.line("\t\t\t}")
-	e.line("\t\t\treturn m, nil")
-	e.line("\t\t}")
-}
-
-// findElemField looks up a named field on a struct-typed array element.
-func findElemField(spec *Spec, arr *Field, name string) *Field {
-	if arr == nil || arr.Elem == nil || arr.Elem.Kind != KindStruct {
-		return nil
-	}
-	st := spec.Structs[arr.Elem.StructName]
-	if st == nil {
-		return nil
-	}
-	for _, f := range st.Fields {
-		if f.Name == name {
-			return f
-		}
-	}
-	return nil
-}
-
 // emitEntryBody writes the populate statements inside a case, gating each
 // action with its own condition when it's narrower than the outer condition.
 func emitEntryBody(e *emitter, ent responseEntry, indent string) {
@@ -687,34 +728,54 @@ func emitEntryBody(e *emitter, ent responseEntry, indent string) {
 		}
 	}
 
-	// Per-array iterations.
-	for i, act := range ent.arrays {
-		idx := fmt.Sprintf("i%d", i)
-		item := fmt.Sprintf("it%d", i)
-		emitGated(e, indent, act.condition, ent.outerCondition, func(inner string) {
-			e.line("%sm.%s = make([]%s, len(r.%s))", inner, act.arrayName, act.respElemType, act.arrayName)
-			if len(act.scalarCopies) == 0 {
-				e.line("%sfor %s := range r.%s {", inner, idx, act.arrayName)
-			} else {
-				e.line("%sfor %s, %s := range r.%s {", inner, idx, item, act.arrayName)
-			}
-			body := inner + "\t"
-			for _, name := range act.scalarCopies {
-				e.line("%sm.%s[%s].%s = %s.%s", body, act.arrayName, idx, name, item, name)
-			}
-			e.line("%sm.%s[%s].ErrorCode = errorCode", body, act.arrayName, idx)
-			if act.msgCondition != "" {
-				if act.msgCondition == act.condition {
-					e.line("%sm.%s[%s].ErrorMessage = errorMessage", body, act.arrayName, idx)
-				} else {
-					e.line("%sif %s {", body, act.msgCondition)
-					e.line("%s\tm.%s[%s].ErrorMessage = errorMessage", body, act.arrayName, idx)
-					e.line("%s}", body)
-				}
-			}
-			e.line("%s}", inner)
-		})
+	// Per-array iterations. Items are appended so multiple actions writing
+	// into the same response array (e.g. Deletions + Upsertions → Results)
+	// concatenate naturally.
+	for _, act := range ent.arrays {
+		emitArrayAction(e, ent, act, indent)
 	}
+}
+
+// emitArrayAction writes the loop that feeds one request array into the
+// response array, gating the loop on the action's version range and the
+// per-element ErrorMessage on its own (potentially narrower) range.
+func emitArrayAction(e *emitter, ent responseEntry, act arrayAction, indent string) {
+	emitGated(e, indent, act.condition, ent.outerCondition, func(inner string) {
+		loopVar := "it"
+		if !act.reqElemIsStruct {
+			loopVar = "v"
+		}
+		needLoopVar := len(act.copies) > 0
+		if needLoopVar {
+			e.line("%sfor _, %s := range r.%s {", inner, loopVar, act.reqArrayName)
+		} else {
+			e.line("%sfor range r.%s {", inner, act.reqArrayName)
+		}
+		body := inner + "\t"
+		e.line("%sitem := %s{}", body, act.respElemType)
+		for _, c := range act.copies {
+			expr := loopVar
+			if c.source != "" {
+				expr = loopVar + "." + c.source
+			}
+			if c.takeAddress {
+				expr = "&" + expr
+			}
+			e.line("%sitem.%s = %s", body, c.respField, expr)
+		}
+		e.line("%sitem.ErrorCode = errorCode", body)
+		if act.msgCondition != "" {
+			if act.msgCondition == "true" || act.msgCondition == act.condition {
+				e.line("%sitem.ErrorMessage = errorMessage", body)
+			} else {
+				e.line("%sif %s {", body, act.msgCondition)
+				e.line("%s\titem.ErrorMessage = errorMessage", body)
+				e.line("%s}", body)
+			}
+		}
+		e.line("%sm.%s = append(m.%s, item)", body, act.respArrayName, act.respArrayName)
+		e.line("%s}", inner)
+	})
 }
 
 // emitGated emits body inside an `if cond { ... }` block, unless cond is

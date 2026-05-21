@@ -396,13 +396,15 @@ func UnmarshalResponse(r *Reader, apiKey, apiVersion int16) (Message, error) {
 
 // ErrorResponse synthesises an error response for req at apiVersion, with
 // errorCode applied to every top-level error field the response exposes:
-// the response's top-level ErrorCode (and ErrorMessage) if present, and one
-// entry per request item for each top-level request array that matches a
-// top-level response array by name and whose elements carry an ErrorCode.
-// Each per-item copy propagates any scalar fields the request and response
-// elements share by name. Returns an error when no response is paired with
-// req's type, or when apiVersion is outside the range in which the response
-// can carry the error on the wire.
+// the response's top-level ErrorCode (and ErrorMessage) when present, and
+// one entry per request item for each top-level request array that maps
+// into a top-level response array. Same-named arrays pair up directly; if
+// the response has just a single top-level array and no top-level
+// ErrorCode, any top-level request array (struct or scalar slice) is fed
+// into it, with scalar copies propagated by matching field name or by the
+// spec's entityType annotation. Returns an error when no response is
+// paired with req's type, or when apiVersion is outside the range in which
+// the response can carry the error on the wire.
 func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage *string) (Message, error) {
 	switch r := req.(type) {
 	case *FetchRequest:
@@ -419,11 +421,12 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 				m.ErrorCode = errorCode
 			}
 			if apiVersion <= 13 {
-				m.Topics = make([]MetadataResponseTopic, len(r.Topics))
-				for i0, it0 := range r.Topics {
-					m.Topics[i0].Name = it0.Name
-					m.Topics[i0].TopicId = it0.TopicId
-					m.Topics[i0].ErrorCode = errorCode
+				for _, it := range r.Topics {
+					item := MetadataResponseTopic{}
+					item.Name = it.Name
+					item.TopicId = it.TopicId
+					item.ErrorCode = errorCode
+					m.Topics = append(m.Topics, item)
 				}
 			}
 			return m, nil
@@ -435,10 +438,11 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 				m.ErrorCode = errorCode
 			}
 			if apiVersion >= 8 && apiVersion <= 10 {
-				m.Groups = make([]OffsetFetchResponseGroup, len(r.Groups))
-				for i0, it0 := range r.Groups {
-					m.Groups[i0].GroupId = it0.GroupId
-					m.Groups[i0].ErrorCode = errorCode
+				for _, it := range r.Groups {
+					item := OffsetFetchResponseGroup{}
+					item.GroupId = it.GroupId
+					item.ErrorCode = errorCode
+					m.Groups = append(m.Groups, item)
 				}
 			}
 			return m, nil
@@ -474,11 +478,12 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 				m.ErrorCode = errorCode
 			}
 			if apiVersion >= 3 && apiVersion <= 5 {
-				m.Members = make([]LeaveGroupResponseMemberResponse, len(r.Members))
-				for i0, it0 := range r.Members {
-					m.Members[i0].MemberId = it0.MemberId
-					m.Members[i0].GroupInstanceId = it0.GroupInstanceId
-					m.Members[i0].ErrorCode = errorCode
+				for _, it := range r.Members {
+					item := LeaveGroupResponseMemberResponse{}
+					item.MemberId = it.MemberId
+					item.GroupInstanceId = it.GroupInstanceId
+					item.ErrorCode = errorCode
+					m.Members = append(m.Members, item)
 				}
 			}
 			return m, nil
@@ -488,6 +493,20 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 		if apiVersion <= 5 {
 			m := &SyncGroupResponse{}
 			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *DescribeGroupsRequest:
+		if apiVersion <= 6 {
+			m := &DescribeGroupsResponse{}
+			for _, v := range r.Groups {
+				item := DescribeGroupsResponseDescribedGroup{}
+				item.GroupId = v
+				item.ErrorCode = errorCode
+				if apiVersion == 6 {
+					item.ErrorMessage = errorMessage
+				}
+				m.Groups = append(m.Groups, item)
+			}
 			return m, nil
 		}
 	case *ListGroupsRequest:
@@ -514,36 +533,39 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 	case *CreateTopicsRequest:
 		if apiVersion >= 2 && apiVersion <= 7 {
 			m := &CreateTopicsResponse{}
-			m.Topics = make([]CreateTopicsResponseCreatableTopicResult, len(r.Topics))
-			for i0, it0 := range r.Topics {
-				m.Topics[i0].Name = it0.Name
-				m.Topics[i0].NumPartitions = it0.NumPartitions
-				m.Topics[i0].ReplicationFactor = it0.ReplicationFactor
-				m.Topics[i0].ErrorCode = errorCode
-				m.Topics[i0].ErrorMessage = errorMessage
+			for _, it := range r.Topics {
+				item := CreateTopicsResponseCreatableTopicResult{}
+				item.Name = it.Name
+				item.NumPartitions = it.NumPartitions
+				item.ReplicationFactor = it.ReplicationFactor
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Topics = append(m.Topics, item)
 			}
 			return m, nil
 		}
 	case *DeleteTopicsRequest:
-		switch {
-		case apiVersion == 6:
+		if apiVersion == 6 || apiVersion >= 1 && apiVersion <= 5 {
 			m := &DeleteTopicsResponse{}
-			m.Responses = make([]DeleteTopicsResponseDeletableTopicResult, len(r.Topics))
-			for i0, it0 := range r.Topics {
-				m.Responses[i0].Name = it0.Name
-				m.Responses[i0].TopicId = it0.TopicId
-				m.Responses[i0].ErrorCode = errorCode
-				m.Responses[i0].ErrorMessage = errorMessage
+			if apiVersion == 6 {
+				for _, it := range r.Topics {
+					item := DeleteTopicsResponseDeletableTopicResult{}
+					item.Name = it.Name
+					item.TopicId = it.TopicId
+					item.ErrorCode = errorCode
+					item.ErrorMessage = errorMessage
+					m.Responses = append(m.Responses, item)
+				}
 			}
-			return m, nil
-		case apiVersion >= 1 && apiVersion <= 5:
-			m := &DeleteTopicsResponse{}
-			m.Responses = make([]DeleteTopicsResponseDeletableTopicResult, len(r.TopicNames))
-			for i0, name0 := range r.TopicNames {
-				m.Responses[i0].Name = &name0
-				m.Responses[i0].ErrorCode = errorCode
-				if apiVersion == 5 {
-					m.Responses[i0].ErrorMessage = errorMessage
+			if apiVersion >= 1 && apiVersion <= 5 {
+				for _, v := range r.TopicNames {
+					item := DeleteTopicsResponseDeletableTopicResult{}
+					item.Name = &v
+					item.ErrorCode = errorCode
+					if apiVersion == 5 {
+						item.ErrorMessage = errorMessage
+					}
+					m.Responses = append(m.Responses, item)
 				}
 			}
 			return m, nil
@@ -584,6 +606,54 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m.ErrorMessage = errorMessage
 			return m, nil
 		}
+	case *CreateAclsRequest:
+		if apiVersion >= 1 && apiVersion <= 3 {
+			m := &CreateAclsResponse{}
+			for range r.Creations {
+				item := CreateAclsResponseAclCreationResult{}
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Results = append(m.Results, item)
+			}
+			return m, nil
+		}
+	case *DeleteAclsRequest:
+		if apiVersion >= 1 && apiVersion <= 3 {
+			m := &DeleteAclsResponse{}
+			for range r.Filters {
+				item := DeleteAclsResponseDeleteAclsFilterResult{}
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.FilterResults = append(m.FilterResults, item)
+			}
+			return m, nil
+		}
+	case *DescribeConfigsRequest:
+		if apiVersion >= 1 && apiVersion <= 4 {
+			m := &DescribeConfigsResponse{}
+			for _, it := range r.Resources {
+				item := DescribeConfigsResponseDescribeConfigsResult{}
+				item.ResourceType = it.ResourceType
+				item.ResourceName = it.ResourceName
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Results = append(m.Results, item)
+			}
+			return m, nil
+		}
+	case *AlterConfigsRequest:
+		if apiVersion <= 2 {
+			m := &AlterConfigsResponse{}
+			for _, it := range r.Resources {
+				item := AlterConfigsResponseAlterConfigsResourceResponse{}
+				item.ResourceType = it.ResourceType
+				item.ResourceName = it.ResourceName
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Responses = append(m.Responses, item)
+			}
+			return m, nil
+		}
 	case *DescribeLogDirsRequest:
 		_ = r
 		if apiVersion >= 3 && apiVersion <= 5 {
@@ -597,6 +667,18 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m := &SaslAuthenticateResponse{}
 			m.ErrorCode = errorCode
 			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *CreatePartitionsRequest:
+		if apiVersion <= 3 {
+			m := &CreatePartitionsResponse{}
+			for _, it := range r.Topics {
+				item := CreatePartitionsResponseCreatePartitionsTopicResult{}
+				item.Name = it.Name
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Results = append(m.Results, item)
+			}
 			return m, nil
 		}
 	case *CreateDelegationTokenRequest:
@@ -627,11 +709,35 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m.ErrorCode = errorCode
 			return m, nil
 		}
+	case *DeleteGroupsRequest:
+		if apiVersion <= 2 {
+			m := &DeleteGroupsResponse{}
+			for _, v := range r.GroupsNames {
+				item := DeleteGroupsResponseDeletableGroupResult{}
+				item.GroupId = v
+				item.ErrorCode = errorCode
+				m.Results = append(m.Results, item)
+			}
+			return m, nil
+		}
 	case *ElectLeadersRequest:
 		_ = r
 		if apiVersion >= 1 && apiVersion <= 2 {
 			m := &ElectLeadersResponse{}
 			m.ErrorCode = errorCode
+			return m, nil
+		}
+	case *IncrementalAlterConfigsRequest:
+		if apiVersion <= 1 {
+			m := &IncrementalAlterConfigsResponse{}
+			for _, it := range r.Resources {
+				item := IncrementalAlterConfigsResponseAlterConfigsResourceResponse{}
+				item.ResourceType = it.ResourceType
+				item.ResourceName = it.ResourceName
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Responses = append(m.Responses, item)
+			}
 			return m, nil
 		}
 	case *AlterPartitionReassignmentsRequest:
@@ -668,10 +774,11 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 	case *AlterClientQuotasRequest:
 		if apiVersion <= 1 {
 			m := &AlterClientQuotasResponse{}
-			m.Entries = make([]AlterClientQuotasResponseEntryData, len(r.Entries))
-			for i0 := range r.Entries {
-				m.Entries[i0].ErrorCode = errorCode
-				m.Entries[i0].ErrorMessage = errorMessage
+			for range r.Entries {
+				item := AlterClientQuotasResponseEntryData{}
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Entries = append(m.Entries, item)
 			}
 			return m, nil
 		}
@@ -681,6 +788,23 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m := &DescribeUserScramCredentialsResponse{}
 			m.ErrorCode = errorCode
 			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *AlterUserScramCredentialsRequest:
+		if apiVersion == 0 {
+			m := &AlterUserScramCredentialsResponse{}
+			for range r.Deletions {
+				item := AlterUserScramCredentialsResponseAlterUserScramCredentialsResult{}
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Results = append(m.Results, item)
+			}
+			for range r.Upsertions {
+				item := AlterUserScramCredentialsResponseAlterUserScramCredentialsResult{}
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Results = append(m.Results, item)
+			}
 			return m, nil
 		}
 	case *VoteRequest:
@@ -773,6 +897,17 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m.ErrorMessage = errorMessage
 			return m, nil
 		}
+	case *DescribeTransactionsRequest:
+		if apiVersion == 0 {
+			m := &DescribeTransactionsResponse{}
+			for _, v := range r.TransactionalIds {
+				item := DescribeTransactionsResponseTransactionState{}
+				item.TransactionalId = v
+				item.ErrorCode = errorCode
+				m.TransactionStates = append(m.TransactionStates, item)
+			}
+			return m, nil
+		}
 	case *ListTransactionsRequest:
 		_ = r
 		if apiVersion <= 2 {
@@ -793,6 +928,18 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m := &ConsumerGroupHeartbeatResponse{}
 			m.ErrorCode = errorCode
 			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ConsumerGroupDescribeRequest:
+		if apiVersion <= 1 {
+			m := &ConsumerGroupDescribeResponse{}
+			for _, v := range r.GroupIds {
+				item := ConsumerGroupDescribeResponseDescribedGroup{}
+				item.GroupId = v
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Groups = append(m.Groups, item)
+			}
 			return m, nil
 		}
 	case *ControllerRegistrationRequest:
@@ -834,9 +981,11 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 	case *DescribeTopicPartitionsRequest:
 		if apiVersion == 0 {
 			m := &DescribeTopicPartitionsResponse{}
-			m.Topics = make([]DescribeTopicPartitionsResponseTopic, len(r.Topics))
-			for i0 := range r.Topics {
-				m.Topics[i0].ErrorCode = errorCode
+			for _, it := range r.Topics {
+				item := DescribeTopicPartitionsResponseTopic{}
+				item.Name = &it.Name
+				item.ErrorCode = errorCode
+				m.Topics = append(m.Topics, item)
 			}
 			return m, nil
 		}
@@ -846,6 +995,18 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m := &ShareGroupHeartbeatResponse{}
 			m.ErrorCode = errorCode
 			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *ShareGroupDescribeRequest:
+		if apiVersion == 1 {
+			m := &ShareGroupDescribeResponse{}
+			for _, v := range r.GroupIds {
+				item := ShareGroupDescribeResponseDescribedGroup{}
+				item.GroupId = v
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Groups = append(m.Groups, item)
+			}
 			return m, nil
 		}
 	case *ShareFetchRequest:
@@ -895,14 +1056,27 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			m.ErrorMessage = errorMessage
 			return m, nil
 		}
+	case *StreamsGroupDescribeRequest:
+		if apiVersion == 0 {
+			m := &StreamsGroupDescribeResponse{}
+			for _, v := range r.GroupIds {
+				item := StreamsGroupDescribeResponseDescribedGroup{}
+				item.GroupId = v
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Groups = append(m.Groups, item)
+			}
+			return m, nil
+		}
 	case *DescribeShareGroupOffsetsRequest:
 		if apiVersion <= 1 {
 			m := &DescribeShareGroupOffsetsResponse{}
-			m.Groups = make([]DescribeShareGroupOffsetsResponseGroup, len(r.Groups))
-			for i0, it0 := range r.Groups {
-				m.Groups[i0].GroupId = it0.GroupId
-				m.Groups[i0].ErrorCode = errorCode
-				m.Groups[i0].ErrorMessage = errorMessage
+			for _, it := range r.Groups {
+				item := DescribeShareGroupOffsetsResponseGroup{}
+				item.GroupId = it.GroupId
+				item.ErrorCode = errorCode
+				item.ErrorMessage = errorMessage
+				m.Groups = append(m.Groups, item)
 			}
 			return m, nil
 		}

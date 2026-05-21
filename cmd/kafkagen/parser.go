@@ -24,6 +24,7 @@ type RawField struct {
 	NullableVersions string     `json:"nullableVersions"`
 	TaggedVersions   string     `json:"taggedVersions"`
 	Tag              *int       `json:"tag"`
+	EntityType       string     `json:"entityType"`
 	Fields           []RawField `json:"fields"`
 }
 
@@ -69,6 +70,12 @@ type Field struct {
 	Tagged   VersionRange
 	Tag      int
 	HasTag   bool
+
+	// EntityType is the Kafka spec's "entityType" annotation (e.g. "topicName",
+	// "groupId"). For scalar-element arrays the annotation appears on the
+	// array field itself and is propagated to f.Elem so consumers can read it
+	// uniformly off the element field. Empty when unset.
+	EntityType string
 }
 
 type FieldKind int
@@ -177,10 +184,11 @@ func resolveField(spec *Spec, rf RawField) (*Field, error) {
 	}
 
 	f := &Field{
-		Name:     rf.Name,
-		Versions: versions,
-		Nullable: nullable,
-		Tagged:   tagged,
+		Name:       rf.Name,
+		Versions:   versions,
+		Nullable:   nullable,
+		Tagged:     tagged,
+		EntityType: rf.EntityType,
 	}
 	if rf.Tag != nil {
 		f.Tag = *rf.Tag
@@ -205,6 +213,11 @@ func resolveType(spec *Spec, f *Field, typ string, inlineFields []RawField) erro
 			Versions: f.Versions,
 			Nullable: VersionRange{None: true},
 			Tagged:   VersionRange{None: true},
+			// For scalar-element arrays (e.g. []string) the entityType is
+			// declared on the outer array field in the JSON spec, but logically
+			// describes the element — propagate it so element-level lookups
+			// find it.
+			EntityType: f.EntityType,
 		}
 		if err := resolveType(spec, elem, typ[2:], inlineFields); err != nil {
 			return err
