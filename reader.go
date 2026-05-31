@@ -306,3 +306,26 @@ func (r *Reader) ReadTaggedFields(handler func(tag uint64, sub *Reader) error) e
 	}
 	return nil
 }
+
+// ReadResponseHeader decodes a Kafka response header. The wire form is just
+// the correlation id (plus a tagged-fields count for flexible apiVersions),
+// so the caller supplies a lookup that maps the just-read corrID back to the
+// (apiKey, apiVersion) of the original request — typically by consulting an
+// in-flight table — which is what we need to decide whether the header is
+// flexible. A non-nil error from lookup is returned as-is.
+func (r *Reader) ReadResponseHeader(lookup func(corrID int32) (apiKey, apiVersion int16, err error)) (corrID int32, apiKey int16, apiVersion int16, err error) {
+	corrID, err = r.ReadInt32()
+	if err != nil {
+		return
+	}
+	apiKey, apiVersion, err = lookup(corrID)
+	if err != nil {
+		return
+	}
+	if responseHeaderFlexible(apiKey, apiVersion) {
+		if err = r.ReadTaggedFields(nil); err != nil {
+			return
+		}
+	}
+	return
+}

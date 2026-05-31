@@ -134,3 +134,13 @@ func (w *Writer) WriteTaggedFields(fields []TaggedField) {
 		w.buf = append(w.buf, f.Body...)
 	}
 }
+
+// WriteResponseHeader encodes a Kafka response header (correlation id, plus
+// an empty tagged-fields block for flexible apiVersions). apiKey and
+// apiVersion are only used to decide whether the header is flexible.
+func (w *Writer) WriteResponseHeader(corrID int32, apiKey int16, apiVersion int16) {
+	w.WriteInt32(corrID)
+	if responseHeaderFlexible(apiKey, apiVersion) {
+		w.WriteTaggedFields(nil)
+	}
+}

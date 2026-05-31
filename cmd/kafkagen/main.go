@@ -163,7 +163,6 @@ func EmitDispatch(specs []*Spec) ([]byte, error) {
 	emitErrorResponseFn(e, specs)
 
 	emitRequestHeaderCodec(e, specs)
-	emitResponseHeaderCodec(e, specs)
 
 	return gofmt(e.buf.Bytes())
 }
@@ -206,42 +205,6 @@ func emitRequestHeaderCodec(e *emitter, specs []*Spec) {
 	e.line("}")
 	e.line("")
 	emitFlexibleSwitch(e, "requestHeaderFlexible", "request", specs)
-}
-
-// emitResponseHeaderCodec writes free-standing ReadResponseHeader and
-// WriteResponseHeader helpers. For flexible (apiKey, apiVersion) combinations
-// the read path consumes the trailing tagged-fields count and the write path
-// emits an empty tagged-fields block. Flexibility is determined per apiKey
-// from the response spec's flexibleVersions.
-func emitResponseHeaderCodec(e *emitter, specs []*Spec) {
-	e.line("// ReadResponseHeader decodes a Kafka response header. The wire form is just")
-	e.line("// the correlation id (plus a tagged-fields count for flexible apiVersions),")
-	e.line("// so the caller supplies a lookup that maps the just-read corrID back to the")
-	e.line("// (apiKey, apiVersion) of the original request — typically by consulting an")
-	e.line("// in-flight table — which is what we need to decide whether the header is")
-	e.line("// flexible. A non-nil error from lookup is returned as-is.")
-	e.line("func ReadResponseHeader(r *Reader, lookup func(corrID int32) (apiKey, apiVersion int16, err error)) (corrID int32, apiKey int16, apiVersion int16, err error) {")
-	e.line("\tcorrID, err = r.ReadInt32()")
-	e.line("\tif err != nil { return }")
-	e.line("\tapiKey, apiVersion, err = lookup(corrID)")
-	e.line("\tif err != nil { return }")
-	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
-	e.line("\t\tif err = r.ReadTaggedFields(nil); err != nil { return }")
-	e.line("\t}")
-	e.line("\treturn")
-	e.line("}")
-	e.line("")
-	e.line("// WriteResponseHeader encodes a Kafka response header (correlation id, plus")
-	e.line("// an empty tagged-fields block for flexible apiVersions). apiKey and")
-	e.line("// apiVersion are only used to decide whether the header is flexible.")
-	e.line("func WriteResponseHeader(w *Writer, corrID int32, apiKey int16, apiVersion int16) {")
-	e.line("\tw.WriteInt32(corrID)")
-	e.line("\tif responseHeaderFlexible(apiKey, apiVersion) {")
-	e.line("\t\tw.WriteTaggedFields(nil)")
-	e.line("\t}")
-	e.line("}")
-	e.line("")
-	emitFlexibleSwitch(e, "responseHeaderFlexible", "response", specs)
 }
 
 func emitFlexibleSwitch(e *emitter, fnName, kind string, specs []*Spec) {
