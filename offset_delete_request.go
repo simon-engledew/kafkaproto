@@ -44,7 +44,7 @@ func (m *OffsetDeleteRequest) Encode(w *Writer, version int16) error {
 
 func (m *OffsetDeleteRequest) decode(r *Reader, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	if flexible {
 		v, err := r.ReadCompactString()
@@ -89,7 +89,7 @@ func (m *OffsetDeleteRequest) decode(r *Reader, version int16) error {
 
 func (m *OffsetDeleteRequestPartition) decode(r *Reader, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	{
 		v, err := r.ReadInt32()
@@ -108,7 +108,7 @@ func (m *OffsetDeleteRequestPartition) decode(r *Reader, version int16) error {
 
 func (m *OffsetDeleteRequestTopic) decode(r *Reader, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	if flexible {
 		v, err := r.ReadCompactString()
@@ -153,7 +153,7 @@ func (m *OffsetDeleteRequestTopic) decode(r *Reader, version int16) error {
 
 func (m *OffsetDeleteRequest) encode(w *Writer, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	if flexible {
 		w.WriteCompactString(m.GroupId)
@@ -181,7 +181,7 @@ func (m *OffsetDeleteRequest) encode(w *Writer, version int16) error {
 
 func (m *OffsetDeleteRequestPartition) encode(w *Writer, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	w.WriteInt32(m.PartitionIndex)
 	if flexible {
@@ -192,7 +192,7 @@ func (m *OffsetDeleteRequestPartition) encode(w *Writer, version int16) error {
 
 func (m *OffsetDeleteRequestTopic) encode(w *Writer, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	if flexible {
 		w.WriteCompactString(m.Name)

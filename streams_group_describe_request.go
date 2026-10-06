@@ -9,6 +9,7 @@ import (
 type StreamsGroupDescribeRequest struct {
 	GroupIds                    []string
 	IncludeAuthorizedOperations bool
+	IncludeTopologyDescription  bool
 }
 
 // Decode reads m from r at the given protocol version. r must be positioned
@@ -74,6 +75,15 @@ func (m *StreamsGroupDescribeRequest) decode(r *Reader, version int16) error {
 		}
 		m.IncludeAuthorizedOperations = v
 	}
+	if version >= 1 {
+		{
+			v, err := r.ReadBool()
+			if err != nil {
+				return err
+			}
+			m.IncludeTopologyDescription = v
+		}
+	}
 	if flexible {
 		if err := r.ReadTaggedFields(nil); err != nil {
 			return err
@@ -102,6 +112,9 @@ func (m *StreamsGroupDescribeRequest) encode(w *Writer, version int16) error {
 		}
 	}
 	w.WriteBool(m.IncludeAuthorizedOperations)
+	if version >= 1 {
+		w.WriteBool(m.IncludeTopologyDescription)
+	}
 	if flexible {
 		w.WriteTaggedFields(nil)
 	}

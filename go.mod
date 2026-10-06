@@ -1,3 +1,4 @@
 module github.com/simon-engledew/kafkaproto
 
-go 1.25.0
+go 1.27
+toolchain go1.27.1

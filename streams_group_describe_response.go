@@ -18,15 +18,18 @@ type StreamsGroupDescribeResponseAssignment struct {
 }
 
 type StreamsGroupDescribeResponseDescribedGroup struct {
-	ErrorCode            int16
-	ErrorMessage         *string
-	GroupId              string
-	GroupState           string
-	GroupEpoch           int32
-	AssignmentEpoch      int32
-	Topology             StreamsGroupDescribeResponseTopology
-	Members              []StreamsGroupDescribeResponseMember
-	AuthorizedOperations int32
+	ErrorCode                 int16
+	ErrorMessage              *string
+	GroupId                   string
+	GroupState                string
+	GroupEpoch                int32
+	AssignmentEpoch           int32
+	Topology                  StreamsGroupDescribeResponseTopology
+	Members                   []StreamsGroupDescribeResponseMember
+	AuthorizedOperations      int32
+	TopologyDescription       StreamsGroupDescribeResponseTopologyDescription
+	TopologyDescriptionStatus int8
+	AssignorName              *string
 }
 
 type StreamsGroupDescribeResponseEndpoint struct {
@@ -86,6 +89,30 @@ type StreamsGroupDescribeResponseTopicInfo struct {
 type StreamsGroupDescribeResponseTopology struct {
 	Epoch         int32
 	Subtopologies []StreamsGroupDescribeResponseSubtopology
+}
+
+type StreamsGroupDescribeResponseTopologyDescription struct {
+	Subtopologies []StreamsGroupDescribeResponseTopologyDescriptionSubtopology
+	GlobalStores  []StreamsGroupDescribeResponseTopologyDescriptionGlobalStore
+}
+
+type StreamsGroupDescribeResponseTopologyDescriptionGlobalStore struct {
+	Source    StreamsGroupDescribeResponseTopologyDescriptionNode
+	Processor StreamsGroupDescribeResponseTopologyDescriptionNode
+}
+
+type StreamsGroupDescribeResponseTopologyDescriptionNode struct {
+	Name         string
+	NodeType     int8
+	SourceTopics []string
+	SinkTopic    *string
+	Stores       []string
+	Successors   []string
+}
+
+type StreamsGroupDescribeResponseTopologyDescriptionSubtopology struct {
+	SubtopologyId string
+	Nodes         []StreamsGroupDescribeResponseTopologyDescriptionNode
 }
 
 // Decode reads m from r at the given protocol version. r must be positioned
@@ -314,6 +341,53 @@ func (m *StreamsGroupDescribeResponseDescribedGroup) decode(r *Reader, version i
 			return err
 		}
 		m.AuthorizedOperations = v
+	}
+	if version >= 1 {
+		if err := m.TopologyDescription.decode(r, version); err != nil {
+			return err
+		}
+	}
+	if version >= 1 {
+		{
+			v, err := r.ReadInt8()
+			if err != nil {
+				return err
+			}
+			m.TopologyDescriptionStatus = v
+		}
+	}
+	if version >= 1 {
+		if version >= 1 {
+			if flexible {
+				v, err := r.ReadCompactNullableString()
+				if err != nil {
+					return err
+				}
+				m.AssignorName = v
+			} else {
+				v, err := r.ReadNullableString()
+				if err != nil {
+					return err
+				}
+				m.AssignorName = v
+			}
+		} else {
+			if flexible {
+				v, err := r.ReadCompactString()
+				if err != nil {
+					return err
+				}
+				s := v
+				m.AssignorName = &s
+			} else {
+				v, err := r.ReadString()
+				if err != nil {
+					return err
+				}
+				s := v
+				m.AssignorName = &s
+			}
+		}
 	}
 	if flexible {
 		if err := r.ReadTaggedFields(nil); err != nil {
@@ -884,6 +958,298 @@ func (m *StreamsGroupDescribeResponseTopology) decode(r *Reader, version int16) 
 	return nil
 }
 
+func (m *StreamsGroupDescribeResponseTopologyDescription) decode(r *Reader, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		{
+			var n int
+			var err error
+			if flexible {
+				n, err = r.ReadCompactArrayLen()
+			} else {
+				n, err = r.ReadArrayLen()
+			}
+			if err != nil {
+				return err
+			}
+			if n >= 0 {
+				m.Subtopologies = make([]StreamsGroupDescribeResponseTopologyDescriptionSubtopology, n)
+				for i := 0; i < n; i++ {
+					if err := m.Subtopologies[i].decode(r, version); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	if version >= 1 {
+		{
+			var n int
+			var err error
+			if flexible {
+				n, err = r.ReadCompactArrayLen()
+			} else {
+				n, err = r.ReadArrayLen()
+			}
+			if err != nil {
+				return err
+			}
+			if n >= 0 {
+				m.GlobalStores = make([]StreamsGroupDescribeResponseTopologyDescriptionGlobalStore, n)
+				for i := 0; i < n; i++ {
+					if err := m.GlobalStores[i].decode(r, version); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	if flexible {
+		if err := r.ReadTaggedFields(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescriptionGlobalStore) decode(r *Reader, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		if err := m.Source.decode(r, version); err != nil {
+			return err
+		}
+	}
+	if version >= 1 {
+		if err := m.Processor.decode(r, version); err != nil {
+			return err
+		}
+	}
+	if flexible {
+		if err := r.ReadTaggedFields(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescriptionNode) decode(r *Reader, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		if flexible {
+			v, err := r.ReadCompactString()
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		} else {
+			v, err := r.ReadString()
+			if err != nil {
+				return err
+			}
+			m.Name = v
+		}
+	}
+	if version >= 1 {
+		{
+			v, err := r.ReadInt8()
+			if err != nil {
+				return err
+			}
+			m.NodeType = v
+		}
+	}
+	if version >= 1 {
+		{
+			var n int
+			var err error
+			if flexible {
+				n, err = r.ReadCompactArrayLen()
+			} else {
+				n, err = r.ReadArrayLen()
+			}
+			if err != nil {
+				return err
+			}
+			if n >= 0 {
+				m.SourceTopics = make([]string, n)
+				for i := 0; i < n; i++ {
+					if flexible {
+						v, err := r.ReadCompactString()
+						if err != nil {
+							return err
+						}
+						m.SourceTopics[i] = v
+					} else {
+						v, err := r.ReadString()
+						if err != nil {
+							return err
+						}
+						m.SourceTopics[i] = v
+					}
+				}
+			}
+		}
+	}
+	if version >= 1 {
+		if version >= 1 {
+			if flexible {
+				v, err := r.ReadCompactNullableString()
+				if err != nil {
+					return err
+				}
+				m.SinkTopic = v
+			} else {
+				v, err := r.ReadNullableString()
+				if err != nil {
+					return err
+				}
+				m.SinkTopic = v
+			}
+		} else {
+			if flexible {
+				v, err := r.ReadCompactString()
+				if err != nil {
+					return err
+				}
+				s := v
+				m.SinkTopic = &s
+			} else {
+				v, err := r.ReadString()
+				if err != nil {
+					return err
+				}
+				s := v
+				m.SinkTopic = &s
+			}
+		}
+	}
+	if version >= 1 {
+		{
+			var n int
+			var err error
+			if flexible {
+				n, err = r.ReadCompactArrayLen()
+			} else {
+				n, err = r.ReadArrayLen()
+			}
+			if err != nil {
+				return err
+			}
+			if n >= 0 {
+				m.Stores = make([]string, n)
+				for i := 0; i < n; i++ {
+					if flexible {
+						v, err := r.ReadCompactString()
+						if err != nil {
+							return err
+						}
+						m.Stores[i] = v
+					} else {
+						v, err := r.ReadString()
+						if err != nil {
+							return err
+						}
+						m.Stores[i] = v
+					}
+				}
+			}
+		}
+	}
+	if version >= 1 {
+		{
+			var n int
+			var err error
+			if flexible {
+				n, err = r.ReadCompactArrayLen()
+			} else {
+				n, err = r.ReadArrayLen()
+			}
+			if err != nil {
+				return err
+			}
+			if n >= 0 {
+				m.Successors = make([]string, n)
+				for i := 0; i < n; i++ {
+					if flexible {
+						v, err := r.ReadCompactString()
+						if err != nil {
+							return err
+						}
+						m.Successors[i] = v
+					} else {
+						v, err := r.ReadString()
+						if err != nil {
+							return err
+						}
+						m.Successors[i] = v
+					}
+				}
+			}
+		}
+	}
+	if flexible {
+		if err := r.ReadTaggedFields(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescriptionSubtopology) decode(r *Reader, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		if flexible {
+			v, err := r.ReadCompactString()
+			if err != nil {
+				return err
+			}
+			m.SubtopologyId = v
+		} else {
+			v, err := r.ReadString()
+			if err != nil {
+				return err
+			}
+			m.SubtopologyId = v
+		}
+	}
+	if version >= 1 {
+		{
+			var n int
+			var err error
+			if flexible {
+				n, err = r.ReadCompactArrayLen()
+			} else {
+				n, err = r.ReadArrayLen()
+			}
+			if err != nil {
+				return err
+			}
+			if n >= 0 {
+				m.Nodes = make([]StreamsGroupDescribeResponseTopologyDescriptionNode, n)
+				for i := 0; i < n; i++ {
+					if err := m.Nodes[i].decode(r, version); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	if flexible {
+		if err := r.ReadTaggedFields(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (m *StreamsGroupDescribeResponse) encode(w *Writer, version int16) error {
 	_ = version
 	flexible := true
@@ -996,6 +1362,32 @@ func (m *StreamsGroupDescribeResponseDescribedGroup) encode(w *Writer, version i
 		}
 	}
 	w.WriteInt32(m.AuthorizedOperations)
+	if version >= 1 {
+		if err := m.TopologyDescription.encode(w, version); err != nil {
+			return err
+		}
+	}
+	if version >= 1 {
+		w.WriteInt8(m.TopologyDescriptionStatus)
+	}
+	if version >= 1 {
+		if version >= 1 {
+			if flexible {
+				w.WriteCompactNullableString(m.AssignorName)
+			} else {
+				w.WriteNullableString(m.AssignorName)
+			}
+		} else {
+			if m.AssignorName == nil {
+				return fmt.Errorf("AssignorName: nil at non-nullable version")
+			}
+			if flexible {
+				w.WriteCompactString(*m.AssignorName)
+			} else {
+				w.WriteString(*m.AssignorName)
+			}
+		}
+	}
 	if flexible {
 		w.WriteTaggedFields(nil)
 	}
@@ -1294,6 +1686,187 @@ func (m *StreamsGroupDescribeResponseTopology) encode(w *Writer, version int16) 
 			}
 			for i := 0; i < n; i++ {
 				if err := m.Subtopologies[i].encode(w, version); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if flexible {
+		w.WriteTaggedFields(nil)
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescription) encode(w *Writer, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		{
+			n := len(m.Subtopologies)
+			if flexible {
+				w.WriteCompactArrayLen(n)
+			} else {
+				w.WriteArrayLen(n)
+			}
+			for i := 0; i < n; i++ {
+				if err := m.Subtopologies[i].encode(w, version); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if version >= 1 {
+		{
+			n := len(m.GlobalStores)
+			if flexible {
+				w.WriteCompactArrayLen(n)
+			} else {
+				w.WriteArrayLen(n)
+			}
+			for i := 0; i < n; i++ {
+				if err := m.GlobalStores[i].encode(w, version); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if flexible {
+		w.WriteTaggedFields(nil)
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescriptionGlobalStore) encode(w *Writer, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		if err := m.Source.encode(w, version); err != nil {
+			return err
+		}
+	}
+	if version >= 1 {
+		if err := m.Processor.encode(w, version); err != nil {
+			return err
+		}
+	}
+	if flexible {
+		w.WriteTaggedFields(nil)
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescriptionNode) encode(w *Writer, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		if flexible {
+			w.WriteCompactString(m.Name)
+		} else {
+			w.WriteString(m.Name)
+		}
+	}
+	if version >= 1 {
+		w.WriteInt8(m.NodeType)
+	}
+	if version >= 1 {
+		{
+			n := len(m.SourceTopics)
+			if flexible {
+				w.WriteCompactArrayLen(n)
+			} else {
+				w.WriteArrayLen(n)
+			}
+			for i := 0; i < n; i++ {
+				if flexible {
+					w.WriteCompactString(m.SourceTopics[i])
+				} else {
+					w.WriteString(m.SourceTopics[i])
+				}
+			}
+		}
+	}
+	if version >= 1 {
+		if version >= 1 {
+			if flexible {
+				w.WriteCompactNullableString(m.SinkTopic)
+			} else {
+				w.WriteNullableString(m.SinkTopic)
+			}
+		} else {
+			if m.SinkTopic == nil {
+				return fmt.Errorf("SinkTopic: nil at non-nullable version")
+			}
+			if flexible {
+				w.WriteCompactString(*m.SinkTopic)
+			} else {
+				w.WriteString(*m.SinkTopic)
+			}
+		}
+	}
+	if version >= 1 {
+		{
+			n := len(m.Stores)
+			if flexible {
+				w.WriteCompactArrayLen(n)
+			} else {
+				w.WriteArrayLen(n)
+			}
+			for i := 0; i < n; i++ {
+				if flexible {
+					w.WriteCompactString(m.Stores[i])
+				} else {
+					w.WriteString(m.Stores[i])
+				}
+			}
+		}
+	}
+	if version >= 1 {
+		{
+			n := len(m.Successors)
+			if flexible {
+				w.WriteCompactArrayLen(n)
+			} else {
+				w.WriteArrayLen(n)
+			}
+			for i := 0; i < n; i++ {
+				if flexible {
+					w.WriteCompactString(m.Successors[i])
+				} else {
+					w.WriteString(m.Successors[i])
+				}
+			}
+		}
+	}
+	if flexible {
+		w.WriteTaggedFields(nil)
+	}
+	return nil
+}
+
+func (m *StreamsGroupDescribeResponseTopologyDescriptionSubtopology) encode(w *Writer, version int16) error {
+	_ = version
+	flexible := true
+	_ = flexible
+	if version >= 1 {
+		if flexible {
+			w.WriteCompactString(m.SubtopologyId)
+		} else {
+			w.WriteString(m.SubtopologyId)
+		}
+	}
+	if version >= 1 {
+		{
+			n := len(m.Nodes)
+			if flexible {
+				w.WriteCompactArrayLen(n)
+			} else {
+				w.WriteArrayLen(n)
+			}
+			for i := 0; i < n; i++ {
+				if err := m.Nodes[i].encode(w, version); err != nil {
 					return err
 				}
 			}

@@ -12,8 +12,9 @@ type DeleteGroupsResponse struct {
 }
 
 type DeleteGroupsResponseDeletableGroupResult struct {
-	GroupId   string
-	ErrorCode int16
+	GroupId      string
+	ErrorCode    int16
+	ErrorMessage *string
 }
 
 // Decode reads m from r at the given protocol version. r must be positioned
@@ -101,6 +102,39 @@ func (m *DeleteGroupsResponseDeletableGroupResult) decode(r *Reader, version int
 		}
 		m.ErrorCode = v
 	}
+	if version >= 3 {
+		if version >= 3 {
+			if flexible {
+				v, err := r.ReadCompactNullableString()
+				if err != nil {
+					return err
+				}
+				m.ErrorMessage = v
+			} else {
+				v, err := r.ReadNullableString()
+				if err != nil {
+					return err
+				}
+				m.ErrorMessage = v
+			}
+		} else {
+			if flexible {
+				v, err := r.ReadCompactString()
+				if err != nil {
+					return err
+				}
+				s := v
+				m.ErrorMessage = &s
+			} else {
+				v, err := r.ReadString()
+				if err != nil {
+					return err
+				}
+				s := v
+				m.ErrorMessage = &s
+			}
+		}
+	}
 	if flexible {
 		if err := r.ReadTaggedFields(nil); err != nil {
 			return err
@@ -143,6 +177,24 @@ func (m *DeleteGroupsResponseDeletableGroupResult) encode(w *Writer, version int
 		w.WriteString(m.GroupId)
 	}
 	w.WriteInt16(m.ErrorCode)
+	if version >= 3 {
+		if version >= 3 {
+			if flexible {
+				w.WriteCompactNullableString(m.ErrorMessage)
+			} else {
+				w.WriteNullableString(m.ErrorMessage)
+			}
+		} else {
+			if m.ErrorMessage == nil {
+				return fmt.Errorf("ErrorMessage: nil at non-nullable version")
+			}
+			if flexible {
+				w.WriteCompactString(*m.ErrorMessage)
+			} else {
+				w.WriteString(*m.ErrorMessage)
+			}
+		}
+	}
 	if flexible {
 		w.WriteTaggedFields(nil)
 	}

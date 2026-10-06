@@ -7,20 +7,22 @@ import (
 )
 
 type StreamsGroupHeartbeatResponse struct {
-	ThrottleTimeMs           int32
-	ErrorCode                int16
-	ErrorMessage             *string
-	MemberId                 string
-	MemberEpoch              int32
-	HeartbeatIntervalMs      int32
-	AcceptableRecoveryLag    int32
-	TaskOffsetIntervalMs     int32
-	Status                   []StreamsGroupHeartbeatResponseStatus
-	ActiveTasks              []StreamsGroupHeartbeatResponseTaskIds
-	StandbyTasks             []StreamsGroupHeartbeatResponseTaskIds
-	WarmupTasks              []StreamsGroupHeartbeatResponseTaskIds
-	EndpointInformationEpoch int32
-	PartitionsByUserEndpoint []StreamsGroupHeartbeatResponseEndpointToPartitions
+	ThrottleTimeMs              int32
+	ErrorCode                   int16
+	ErrorMessage                *string
+	MemberId                    string
+	MemberEpoch                 int32
+	HeartbeatIntervalMs         int32
+	AcceptableRecoveryLagLegacy int32
+	TaskOffsetIntervalMs        int32
+	AcceptableRecoveryLag       int64
+	Status                      []StreamsGroupHeartbeatResponseStatus
+	ActiveTasks                 []StreamsGroupHeartbeatResponseTaskIds
+	StandbyTasks                []StreamsGroupHeartbeatResponseTaskIds
+	WarmupTasks                 []StreamsGroupHeartbeatResponseTaskIds
+	TopologyDescriptionRequired bool
+	EndpointInformationEpoch    int32
+	PartitionsByUserEndpoint    []StreamsGroupHeartbeatResponseEndpointToPartitions
 }
 
 type StreamsGroupHeartbeatResponseEndpoint struct {
@@ -129,12 +131,14 @@ func (m *StreamsGroupHeartbeatResponse) decode(r *Reader, version int16) error {
 		}
 		m.HeartbeatIntervalMs = v
 	}
-	{
-		v, err := r.ReadInt32()
-		if err != nil {
-			return err
+	if version == 0 {
+		{
+			v, err := r.ReadInt32()
+			if err != nil {
+				return err
+			}
+			m.AcceptableRecoveryLagLegacy = v
 		}
-		m.AcceptableRecoveryLag = v
 	}
 	{
 		v, err := r.ReadInt32()
@@ -142,6 +146,15 @@ func (m *StreamsGroupHeartbeatResponse) decode(r *Reader, version int16) error {
 			return err
 		}
 		m.TaskOffsetIntervalMs = v
+	}
+	if version >= 1 {
+		{
+			v, err := r.ReadInt64()
+			if err != nil {
+				return err
+			}
+			m.AcceptableRecoveryLag = v
+		}
 	}
 	{
 		var n int
@@ -221,6 +234,15 @@ func (m *StreamsGroupHeartbeatResponse) decode(r *Reader, version int16) error {
 					return err
 				}
 			}
+		}
+	}
+	if version >= 1 {
+		{
+			v, err := r.ReadBool()
+			if err != nil {
+				return err
+			}
+			m.TopologyDescriptionRequired = v
 		}
 	}
 	{
@@ -493,8 +515,13 @@ func (m *StreamsGroupHeartbeatResponse) encode(w *Writer, version int16) error {
 	}
 	w.WriteInt32(m.MemberEpoch)
 	w.WriteInt32(m.HeartbeatIntervalMs)
-	w.WriteInt32(m.AcceptableRecoveryLag)
+	if version == 0 {
+		w.WriteInt32(m.AcceptableRecoveryLagLegacy)
+	}
 	w.WriteInt32(m.TaskOffsetIntervalMs)
+	if version >= 1 {
+		w.WriteInt64(m.AcceptableRecoveryLag)
+	}
 	{
 		if m.Status == nil {
 			if flexible {
@@ -578,6 +605,9 @@ func (m *StreamsGroupHeartbeatResponse) encode(w *Writer, version int16) error {
 				}
 			}
 		}
+	}
+	if version >= 1 {
+		w.WriteBool(m.TopologyDescriptionRequired)
 	}
 	w.WriteInt32(m.EndpointInformationEpoch)
 	{

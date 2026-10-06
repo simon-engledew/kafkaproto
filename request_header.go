@@ -11,6 +11,7 @@ type RequestHeader struct {
 	RequestApiVersion int16
 	CorrelationId     int32
 	ClientId          *string
+	ClientInstanceId  [16]byte
 }
 
 // Decode reads m from r at the given protocol version. r must be positioned
@@ -94,7 +95,22 @@ func (m *RequestHeader) decode(r *Reader, version int16) error {
 		}
 	}
 	if flexible {
-		if err := r.ReadTaggedFields(nil); err != nil {
+		if err := r.ReadTaggedFields(func(tag uint64, sub *Reader) error {
+			switch tag {
+			case 0:
+				if !(version >= 3) {
+					return nil
+				}
+				{
+					v, err := sub.ReadUUID()
+					if err != nil {
+						return err
+					}
+					m.ClientInstanceId = v
+				}
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
@@ -127,7 +143,13 @@ func (m *RequestHeader) encode(w *Writer, version int16) error {
 		}
 	}
 	if flexible {
-		w.WriteTaggedFields(nil)
+		var tfs []TaggedField
+		if version >= 3 {
+			sub := NewWriter()
+			sub.WriteUUID(m.ClientInstanceId)
+			tfs = append(tfs, TaggedField{Tag: 0, Body: sub.Bytes()})
+		}
+		w.WriteTaggedFields(tfs)
 	}
 	return nil
 }

@@ -12,8 +12,7 @@ type Message interface {
 
 // UnmarshalRequest decodes a Kafka request body from r (positioned after the request/response
 // header) into the appropriate generated struct, dispatched on apiKey.
-func UnmarshalRequest(r *Reader, apiKey, apiVersion int16) (Message, error) {
-	var m Message
+func UnmarshalRequest(r *Reader, apiKey, apiVersion int16) (m Message, err error) {
 	switch apiKey {
 	case 0:
 		m = &ProduceRequest{}
@@ -193,19 +192,22 @@ func UnmarshalRequest(r *Reader, apiKey, apiVersion int16) (Message, error) {
 		m = &AlterShareGroupOffsetsRequest{}
 	case 92:
 		m = &DeleteShareGroupOffsetsRequest{}
+	case 93:
+		m = &StreamsGroupTopologyDescriptionUpdateRequest{}
+	case 94:
+		m = &UnregisterControllerRequest{}
 	default:
-		return nil, fmt.Errorf("kafkaproto: unsupported request apiKey %d", apiKey)
+		return m, fmt.Errorf("kafkaproto: unsupported request apiKey %d", apiKey)
 	}
-	if err := m.Decode(r, apiVersion); err != nil {
-		return nil, err
+	if err = m.Decode(r, apiVersion); err != nil {
+		return
 	}
-	return m, nil
+	return
 }
 
 // UnmarshalResponse decodes a Kafka response body from r (positioned after the request/response
 // header) into the appropriate generated struct, dispatched on apiKey.
-func UnmarshalResponse(r *Reader, apiKey, apiVersion int16) (Message, error) {
-	var m Message
+func UnmarshalResponse(r *Reader, apiKey, apiVersion int16) (m Message, err error) {
 	switch apiKey {
 	case 0:
 		m = &ProduceResponse{}
@@ -385,13 +387,17 @@ func UnmarshalResponse(r *Reader, apiKey, apiVersion int16) (Message, error) {
 		m = &AlterShareGroupOffsetsResponse{}
 	case 92:
 		m = &DeleteShareGroupOffsetsResponse{}
+	case 93:
+		m = &StreamsGroupTopologyDescriptionUpdateResponse{}
+	case 94:
+		m = &UnregisterControllerResponse{}
 	default:
-		return nil, fmt.Errorf("kafkaproto: unsupported response apiKey %d", apiKey)
+		return m, fmt.Errorf("kafkaproto: unsupported response apiKey %d", apiKey)
 	}
-	if err := m.Decode(r, apiVersion); err != nil {
-		return nil, err
+	if err = m.Decode(r, apiVersion); err != nil {
+		return
 	}
-	return m, nil
+	return
 }
 
 // ErrorResponse synthesises an error response for req at apiVersion, with
@@ -710,12 +716,15 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 			return m, nil
 		}
 	case *DeleteGroupsRequest:
-		if apiVersion <= 2 {
+		if apiVersion <= 3 {
 			m := &DeleteGroupsResponse{}
 			for _, v := range r.GroupsNames {
 				item := DeleteGroupsResponseDeletableGroupResult{}
 				item.GroupId = v
 				item.ErrorCode = errorCode
+				if apiVersion == 3 {
+					item.ErrorMessage = errorMessage
+				}
 				m.Results = append(m.Results, item)
 			}
 			return m, nil
@@ -758,7 +767,7 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 		}
 	case *OffsetDeleteRequest:
 		_ = r
-		if apiVersion == 0 {
+		if apiVersion <= 1 {
 			m := &OffsetDeleteResponse{}
 			m.ErrorCode = errorCode
 			return m, nil
@@ -1050,14 +1059,14 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 		}
 	case *StreamsGroupHeartbeatRequest:
 		_ = r
-		if apiVersion == 0 {
+		if apiVersion <= 1 {
 			m := &StreamsGroupHeartbeatResponse{}
 			m.ErrorCode = errorCode
 			m.ErrorMessage = errorMessage
 			return m, nil
 		}
 	case *StreamsGroupDescribeRequest:
-		if apiVersion == 0 {
+		if apiVersion <= 1 {
 			m := &StreamsGroupDescribeResponse{}
 			for _, v := range r.GroupIds {
 				item := StreamsGroupDescribeResponseDescribedGroup{}
@@ -1092,6 +1101,22 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 		_ = r
 		if apiVersion == 0 {
 			m := &DeleteShareGroupOffsetsResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *StreamsGroupTopologyDescriptionUpdateRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &StreamsGroupTopologyDescriptionUpdateResponse{}
+			m.ErrorCode = errorCode
+			m.ErrorMessage = errorMessage
+			return m, nil
+		}
+	case *UnregisterControllerRequest:
+		_ = r
+		if apiVersion == 0 {
+			m := &UnregisterControllerResponse{}
 			m.ErrorCode = errorCode
 			m.ErrorMessage = errorMessage
 			return m, nil
@@ -1231,7 +1256,7 @@ func requestHeaderFlexible(apiKey, apiVersion int16) bool {
 	case 46: // ListPartitionReassignmentsRequest
 		return true
 	case 47: // OffsetDeleteRequest
-		return false
+		return apiVersion >= 1
 	case 48: // DescribeClientQuotasRequest
 		return apiVersion >= 1
 	case 49: // AlterClientQuotasRequest
@@ -1321,6 +1346,10 @@ func requestHeaderFlexible(apiKey, apiVersion int16) bool {
 	case 91: // AlterShareGroupOffsetsRequest
 		return true
 	case 92: // DeleteShareGroupOffsetsRequest
+		return true
+	case 93: // StreamsGroupTopologyDescriptionUpdateRequest
+		return true
+	case 94: // UnregisterControllerRequest
 		return true
 	}
 	return false
@@ -1416,7 +1445,7 @@ func responseHeaderFlexible(apiKey, apiVersion int16) bool {
 	case 46: // ListPartitionReassignmentsResponse
 		return true
 	case 47: // OffsetDeleteResponse
-		return false
+		return apiVersion >= 1
 	case 48: // DescribeClientQuotasResponse
 		return apiVersion >= 1
 	case 49: // AlterClientQuotasResponse
@@ -1506,6 +1535,10 @@ func responseHeaderFlexible(apiKey, apiVersion int16) bool {
 	case 91: // AlterShareGroupOffsetsResponse
 		return true
 	case 92: // DeleteShareGroupOffsetsResponse
+		return true
+	case 93: // StreamsGroupTopologyDescriptionUpdateResponse
+		return true
+	case 94: // UnregisterControllerResponse
 		return true
 	}
 	return false

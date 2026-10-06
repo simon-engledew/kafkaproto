@@ -163,6 +163,7 @@ func EmitDispatch(specs []*Spec) ([]byte, error) {
 	emitErrorResponseFn(e, specs)
 
 	emitRequestHeaderCodec(e, specs)
+	emitFlexibleSwitch(e, "responseHeaderFlexible", "response", specs)
 
 	return gofmt(e.buf.Bytes())
 }
@@ -771,8 +772,7 @@ func emitDispatchFn(e *emitter, fnName, kind string, specs []*Spec) {
 
 	e.line("// %s decodes a Kafka %s body from r (positioned after the request/response", fnName, kind)
 	e.line("// header) into the appropriate generated struct, dispatched on apiKey.")
-	e.line("func %s(r *Reader, apiKey, apiVersion int16) (Message, error) {", fnName)
-	e.line("\tvar m Message")
+	e.line("func %s(r *Reader, apiKey, apiVersion int16) (m Message, err error) {", fnName)
 	e.line("\tswitch apiKey {")
 	for _, k := range keys {
 		s := byKey[k]
@@ -780,12 +780,12 @@ func emitDispatchFn(e *emitter, fnName, kind string, specs []*Spec) {
 		e.line("\t\tm = &%s{}", s.Name)
 	}
 	e.line("\tdefault:")
-	e.line("\t\treturn nil, fmt.Errorf(\"kafkaproto: unsupported %s apiKey %%d\", apiKey)", kind)
+	e.line("\t\treturn m, fmt.Errorf(\"kafkaproto: unsupported %s apiKey %%d\", apiKey)", kind)
 	e.line("\t}")
-	e.line("\tif err := m.Decode(r, apiVersion); err != nil {")
-	e.line("\t\treturn nil, err")
+	e.line("\tif err = m.Decode(r, apiVersion); err != nil {")
+	e.line("\t\treturn")
 	e.line("\t}")
-	e.line("\treturn m, nil")
+	e.line("\treturn")
 	e.line("}")
 	e.line("")
 }

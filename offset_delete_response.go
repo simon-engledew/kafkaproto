@@ -46,7 +46,7 @@ func (m *OffsetDeleteResponse) Encode(w *Writer, version int16) error {
 
 func (m *OffsetDeleteResponse) decode(r *Reader, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	{
 		v, err := r.ReadInt16()
@@ -92,7 +92,7 @@ func (m *OffsetDeleteResponse) decode(r *Reader, version int16) error {
 
 func (m *OffsetDeleteResponsePartition) decode(r *Reader, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	{
 		v, err := r.ReadInt32()
@@ -118,7 +118,7 @@ func (m *OffsetDeleteResponsePartition) decode(r *Reader, version int16) error {
 
 func (m *OffsetDeleteResponseTopic) decode(r *Reader, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	if flexible {
 		v, err := r.ReadCompactString()
@@ -163,7 +163,7 @@ func (m *OffsetDeleteResponseTopic) decode(r *Reader, version int16) error {
 
 func (m *OffsetDeleteResponse) encode(w *Writer, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	w.WriteInt16(m.ErrorCode)
 	w.WriteInt32(m.ThrottleTimeMs)
@@ -188,7 +188,7 @@ func (m *OffsetDeleteResponse) encode(w *Writer, version int16) error {
 
 func (m *OffsetDeleteResponsePartition) encode(w *Writer, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	w.WriteInt32(m.PartitionIndex)
 	w.WriteInt16(m.ErrorCode)
@@ -200,7 +200,7 @@ func (m *OffsetDeleteResponsePartition) encode(w *Writer, version int16) error {
 
 func (m *OffsetDeleteResponseTopic) encode(w *Writer, version int16) error {
 	_ = version
-	flexible := false
+	flexible := version >= 1
 	_ = flexible
 	if flexible {
 		w.WriteCompactString(m.Name)
