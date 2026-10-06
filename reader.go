@@ -285,7 +285,7 @@ func (r *Reader) ReadTaggedFields(handler func(tag uint64, sub *Reader) error) e
 	if err != nil {
 		return fmt.Errorf("tagged-fields count: %w", err)
 	}
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		tag, err := r.ReadUvarint()
 		if err != nil {
 			return fmt.Errorf("tagged-field[%d] tag: %w", i, err)
