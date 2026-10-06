@@ -1128,7 +1128,7 @@ func ErrorResponse(req Message, apiVersion int16, errorCode int16, errorMessage 
 // ReadRequestHeader decodes a Kafka request header. For flexible (apiKey,
 // apiVersion) combinations it also consumes the trailing tagged-fields count,
 // leaving r positioned at the start of the request body.
-func ReadRequestHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32, clientID *string, err error) {
+func (r *Reader) ReadRequestHeader() (apiKey int16, apiVersion int16, corrID int32, clientID *string, err error) {
 	apiKey, err = r.ReadInt16()
 	if err != nil {
 		return
@@ -1156,7 +1156,7 @@ func ReadRequestHeader(r *Reader) (apiKey int16, apiVersion int16, corrID int32,
 // WriteRequestHeader encodes a Kafka request header (apiKey, apiVersion,
 // correlation id, client id). For flexible (apiKey, apiVersion) combinations
 // it also writes an empty tagged-fields block.
-func WriteRequestHeader(w *Writer, apiKey int16, apiVersion int16, corrID int32, clientID *string) {
+func (w *Writer) WriteRequestHeader(apiKey int16, apiVersion int16, corrID int32, clientID *string) {
 	w.WriteInt16(apiKey)
 	w.WriteInt16(apiVersion)
 	w.WriteInt32(corrID)
